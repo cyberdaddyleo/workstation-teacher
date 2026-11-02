@@ -511,8 +511,45 @@ svg.ava { border-radius: 50%; overflow: hidden; }
 .sub-item input { width: 52px; height: 26px; border: 0; border-radius: 6px; background: #fff; text-align: center; font-family: var(--num); font-size: 12.5px; outline: none; }
 .sub-item button { color: var(--ink3); width: 20px; height: 20px; border-radius: 6px; }
 .sub-item button:hover { background: #fff; color: var(--red); }
-.mini-class { display: inline-grid; gap: 3px; padding: 10px; background: var(--fill); border-radius: 12px; }
-.mini-class i { display: block; width: 14px; height: 10px; background: #fff; border-radius: 2px; box-shadow: 0 0 0 1px var(--line2); }
+/* ---------- 班级设置 · 桌椅排列 ---------- */
+.cs-h { font-size: 14.5px; font-weight: 700; margin: 8px 0 12px; }
+.seg.lg { display: flex; padding: 4px; }
+.seg.lg button { height: 34px; padding: 0 18px; font-size: 14px; }
+.chips.lg button { height: 34px; padding: 0 14px; font-size: 13.5px; }
+.cs-grid { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 22px; align-items: start; }
+.cs-ctrl .field { margin-bottom: 16px; }
+.cs-steps { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
+.stepper { display: inline-flex; align-items: center; gap: 8px; background: var(--fill); border-radius: 999px; padding: 4px 12px 4px 14px; font-size: 13px; }
+.stepper button { width: 28px; height: 28px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, .1); font-size: 16px; line-height: 1; color: var(--ink); }
+.stepper button:hover:not(:disabled) { background: var(--ink); color: #fff; }
+.stepper button:disabled { opacity: .35; cursor: default; }
+.stepper b { min-width: 22px; text-align: center; font-size: 15px; }
+.cs-prev { background: var(--fill); border-radius: 16px; padding: 22px 14px 16px; display: flex; flex-direction: column; align-items: center; gap: 12px; min-height: 280px; justify-content: center; }
+.cs-prev.sm { min-height: 0; padding: 16px 18px; }
+.cs-pod { background: #fff; border-radius: 8px; padding: 4px 22px; font-size: 12.5px; color: var(--ink3); box-shadow: 0 0 0 1px var(--line); }
+.cs-seats { display: flex; flex-direction: column; gap: 4px; }
+.cs-podrow { display: flex; align-items: center; justify-content: center; gap: 12px; margin-bottom: 8px; }
+.cs-desk.pod { gap: 4px; min-width: 1px; }
+.cs-row { display: flex; gap: var(--gd); justify-content: center; }
+.cs-desk { display: flex; gap: 2px; }
+.cs-desk i { display: block; width: var(--q); height: var(--q); border-radius: 3px; background: #fff; box-shadow: inset 0 0 0 1px var(--line2); }
+.cs-desk i.on { background: var(--ink); box-shadow: none; }
+.cs-cap { font-size: 12.5px; color: var(--ink3); text-align: center; line-height: 1.6; }
+.cs-warn { font-size: 12.5px; color: var(--red); text-align: center; line-height: 1.6; }
+.cs-count { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.cs-n { display: flex; align-items: baseline; gap: 6px; margin-top: 6px; font-size: 14px; }
+.cs-n b { font-size: 22px; }
+.cs-n .muted { font-size: 13px; margin-left: 8px; }
+.cs-acts { margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; }
+.room-sum { display: flex; flex-direction: column; justify-content: center; flex: 1; min-width: 240px; }
+.room-sum .btn { align-self: flex-start; }
+.room-wrap { display: flex; gap: 24px; align-items: center; flex-wrap: wrap; }
+.dev-info { margin-top: 12px; padding: 12px 14px; border-radius: 12px; box-shadow: inset 0 0 0 1px var(--line); font-size: 13px; }
+.dev-info > b { display: block; margin-bottom: 8px; }
+.dev-info .info-grid { grid-template-columns: 112px 1fr; font-size: 13px; }
+.dev-mail { display: flex; align-items: center; gap: 8px; }
+.dev-mail a { color: var(--ink); font-family: var(--num); }
+@media (max-width: 860px) { .cs-grid { grid-template-columns: 1fr; } }
 
 /* ---------- 引导 ---------- */
 .welcome { position: fixed; inset: 0; z-index: 100; background: var(--bg); display: grid; place-items: center; animation: fade .3s; overflow-y: auto; padding: 24px; }
@@ -671,31 +708,55 @@ var ART = (function () {
 
   /* ---------- 布局 ---------- */
   /* extra：根据屏幕宽高比加宽教室两侧（放图书角、生物角等），避免左右大片留白 */
-  function layout(rows, pairs, extra) {
-    var L = { rows: rows, pairs: pairs };
+  /* cols：每排几张桌子；desk：每张桌子坐几人（1 单人单列 / 2 双人同桌 / 3 三人一排）；pod：{L, R} 讲台左右各几张单人桌 */
+  function layout(rows, cols, extra, desk, pod) {
+    desk = desk || 2;
+    var L = { rows: rows, cols: cols, desk: desk, podL: (pod && pod.L) || 0, podR: (pod && pod.R) || 0 };
     extra = Math.max(0, Math.round(extra || 0));
     L.DW = 92; L.DD = 44; L.DF = 10; L.LEG = 18;
-    L.PAIR = L.DW * 2; L.AISLE = 58; L.SIDE = 96; L.WT = 16;
-    var ae = pairs > 1 ? Math.min(56, Math.floor(extra * 0.07)) : 0;
-    L.AISLE += ae; extra -= ae * (pairs - 1);
+    L.UNIT = L.DW * desk; L.AISLE = desk === 1 ? 42 : 58; L.SIDE = 96; L.WT = 16;
+    var ae = cols > 1 ? Math.min(desk === 1 ? 18 : 56, Math.floor(extra * 0.07)) : 0;
+    L.AISLE += ae; extra -= ae * (cols - 1);
+    L.gridW = cols * L.UNIT + (cols - 1) * L.AISLE;
+    // 桌子很少时也保证黑板、讲台有地方放：不足的宽度补到两侧
+    var pad = Math.max(0, Math.ceil((600 - L.gridW) / 2));
+    // 讲台：讲桌 240 宽；两边有桌子时，地台加宽到放得下（桌子离讲桌 30，桌子之间 14）
+    L.LECT = 240; L.PGAP = 30; L.PSEP = 14;
+    var podN = Math.max(L.podL, L.podR);
+    var needPW = podN ? L.LECT + 2 * (L.PGAP + podN * L.DW + (podN - 1) * L.PSEP + 24) : 0;
+    var w0 = L.gridW + 2 * (L.SIDE + pad) + 2 * L.WT;
+    if (needPW + 2 * L.WT + 80 > w0) pad += Math.ceil((needPW + 2 * L.WT + 80 - w0) / 2);
     var half = Math.min(320, Math.floor(extra / 2));   // 两侧各最多加宽 320，再宽就留一点边距
-    L.SIDEL = L.SIDE + half; L.SIDER = L.SIDE + half;
+    L.SIDEL = L.SIDE + pad + half; L.SIDER = L.SIDE + pad + half;
     L.FRONT = 214;            // 前墙立面高度
     L.PLAT = 92;              // 讲台地台进深
     L.ROW = 112;              // 行距
-    L.gridW = pairs * L.PAIR + (pairs - 1) * L.AISLE;
     L.W = L.gridW + L.SIDEL + L.SIDER + 2 * L.WT;
     L.gx0 = L.WT + L.SIDEL; L.gx1 = L.gx0 + L.gridW;
     L.row0 = L.FRONT + L.PLAT + 36;
     L.BACK = 96;
     L.H = L.row0 + rows * L.ROW + L.BACK + L.WT;
     L.seatX = function (c) {
-      var p = Math.floor(c / 2), s = c % 2;
-      return L.gx0 + p * (L.PAIR + L.AISLE) + s * L.DW;
+      var p = Math.floor(c / desk), s = c % desk;
+      return L.gx0 + p * (L.UNIT + L.AISLE) + s * L.DW;
     };
     L.seatY = function (r) { return L.row0 + r * L.ROW; };
     L.headX = function (c) { return L.seatX(c) + L.DW / 2; };
     L.headY = function (r) { return L.seatY(r) + L.DD + 2; };
+    L.PW = Math.max(Math.min(Math.max(L.gridW, 560) + 60, 900), needPW);
+    L.PX = (L.W - L.PW) / 2;
+    L.lx = (L.W - L.LECT) / 2;
+    // 任意座位（含讲台边）课桌左上角
+    L.pos = function (key) {
+      var m = /^pod([LR])(\d)$/.exec(key);
+      if (m) {
+        var i = +m[2] - 1, y = L.FRONT + 14;
+        return m[1] === 'L' ? { x: L.lx - L.PGAP - (i + 1) * L.DW - i * L.PSEP, y: y } : { x: L.lx + L.LECT + L.PGAP + i * (L.DW + L.PSEP), y: y };
+      }
+      var p = String(key).split('-');
+      return { x: L.seatX(+p[1]), y: L.seatY(+p[0]) };
+    };
+    L.head = function (key) { var q = L.pos(key); return { x: q.x + L.DW / 2, y: q.y + L.DD + 2 }; };
     return L;
   }
 
@@ -932,7 +993,7 @@ var ART = (function () {
     s += rect(0, 10, W, 1, 0, '#e4e4e2');
     s += rect(0, L.FRONT - 8, W, 8, 0, '#e6e6e4');
     s += rect(0, L.FRONT - 8, W, 1, 0, '#dcdcda');
-    var BW = Math.min(800, L.gridW + 40), BH = 106, bx = (W - BW) / 2, by = 28;
+    var BW = Math.min(800, Math.max(L.gridW, 560) + 40), BH = 106, bx = (W - BW) / 2, by = 28;
     var SW = 292;
     var pw = (BW - SW - 16) / 2;
     // 黑板阴影
@@ -1033,21 +1094,24 @@ var ART = (function () {
   /* ---------- 讲台 ---------- */
   function podium(L, t) {
     var s = '', W = L.W;
-    var pw = Math.min(L.gridW + 60, 900), px = (W - pw) / 2, py = L.FRONT, ph = L.PLAT - 8;
+    var pw = L.PW, px = L.PX, py = L.FRONT, ph = L.PLAT - 8;
     // 地台
     s += rect(px, py, pw, ph, 0, 'url(#gPlat)');
     s += rect(px, py, pw, 1, 0, '#e8e8e6');
     s += rect(px, py + ph, pw, 8, 0, '#e4e4e2');
     s += rect(px, py + ph, pw, 1, 0, '#d9d9d7');
     s += poly([[px + pw, py + ph + 8], [px, py + ph + 8], [px - 18, py + ph + 34], [px + pw - 18, py + ph + 34]], '#000', { 'fill-opacity': '.07', filter: 'url(#fxShadow)' });
-    // 作业筐
+    // 作业筐（讲台左边有桌子时挪到桌子外侧，放不下就不放）
     var hx = px + 60, hy = py + 22;
-    s += rect(hx - 8, hy + 10, 70, 46, 6, '#000', { 'fill-opacity': '.07', filter: 'url(#fxShadowS)' });
-    s += rect(hx, hy, 70, 46, 5, '#ffffff', { stroke: '#dcdcda', 'stroke-width': .9 });
-    s += rect(hx + 5, hy + 5, 60, 36, 3, '#f1f1ef');
-    s += rect(hx + 9, hy + 9, 24, 28, 1.5, '#dbe7f6', { stroke: '#9fbde3', 'stroke-width': .7, transform: 'rotate(-6 ' + (hx + 21) + ' ' + (hy + 23) + ')' });
-    s += rect(hx + 32, hy + 8, 24, 28, 1.5, '#f6ecc9', { stroke: '#e2c66e', 'stroke-width': .7, transform: 'rotate(5 ' + (hx + 44) + ' ' + (hy + 22) + ')' });
-    s += rect(hx + 20, hy + 11, 24, 28, 1.5, '#ffffff', { stroke: '#d5d5d3', 'stroke-width': .7 });
+    if (L.podL) hx = L.pos('podL' + L.podL).x - 86;
+    if (hx >= px + 8) {
+      s += rect(hx - 8, hy + 10, 70, 46, 6, '#000', { 'fill-opacity': '.07', filter: 'url(#fxShadowS)' });
+      s += rect(hx, hy, 70, 46, 5, '#ffffff', { stroke: '#dcdcda', 'stroke-width': .9 });
+      s += rect(hx + 5, hy + 5, 60, 36, 3, '#f1f1ef');
+      s += rect(hx + 9, hy + 9, 24, 28, 1.5, '#dbe7f6', { stroke: '#9fbde3', 'stroke-width': .7, transform: 'rotate(-6 ' + (hx + 21) + ' ' + (hy + 23) + ')' });
+      s += rect(hx + 32, hy + 8, 24, 28, 1.5, '#f6ecc9', { stroke: '#e2c66e', 'stroke-width': .7, transform: 'rotate(5 ' + (hx + 44) + ' ' + (hy + 22) + ')' });
+      s += rect(hx + 20, hy + 11, 24, 28, 1.5, '#ffffff', { stroke: '#d5d5d3', 'stroke-width': .7 });
+    }
     // 讲桌
     var lw = 240, lx = (W - lw) / 2, ly = py + 12, ld = 46, lf = 30;
     var tx = W / 2 - 34, ty = ly - 52;
@@ -1304,15 +1368,53 @@ var ART = (function () {
   }
 
   /* ---------- 整个场景 ---------- */
-  /* data: { rows, pairs, seats: {"r-c": student}, teacher:{gender,label}, board:{...}, views:{sid:{...}}, mode } */
+  /* data: { rows, cols, desk, pod:{L,R}, extra, seats: {"座位编号": student}, teacher:{gender,label}, board:{...}, views:{sid:{...}}, seatNos } */
   function scene(data) {
-    var L = layout(data.rows, data.pairs, data.extra);
+    var L = layout(data.rows, data.cols, data.extra, data.desk, data.pod);
     L.subjects = data.subjects;
-    var cols = data.pairs * 2;
+    var cols = data.cols * (data.desk || 2);
+    var podK = [], pi;
+    for (pi = 1; pi <= L.podL; pi++) podK.push('podL' + pi);
+    for (pi = 1; pi <= L.podR; pi++) podK.push('podR' + pi);
     var out = '<svg class="scene-svg" viewBox="0 0 ' + L.W + ' ' + L.H + '" width="' + L.W + '" height="' + L.H + '" xmlns="http://www.w3.org/2000/svg">' + defs();
     out += room(L);
     out += frontWall(L, data.board || {});
     out += podium(L, data.teacher || {});
+    // 一个座位：课桌 + 椅子 + 学生（或空位上的 +）+ 角标
+    function cell(key, label) {
+      var q = L.pos(key), x = q.x, y = q.y, cx = x + L.DW / 2, cy = y + L.DD + 2;
+      var st = data.seats[key];
+      var v = (st && data.views && data.views[st.id]) || {};
+      var cls = 'seat' + (st ? ' has' : ' empty') + (v.cls ? ' ' + v.cls : '');
+      var g = '<g class="' + cls + '" data-seat="' + key + '"' + (st ? ' data-sid="' + st.id + '"' : '') + '>';
+      g += rect(x + 2, y - 6, L.DW - 4, L.ROW - 4, 10, 'transparent', { 'class': 'hit' });
+      g += '<g class="desk-g">' + desk(L, x, y);
+      if (v.tint) g += rect(x, y, L.DW, L.DD, 3, v.tint, { 'class': 'tint' });
+      g += deskProps(x, y, L.DW, hash(key + (st ? st.id : '')));
+      g += '</g>';
+      if (st) g += txt(cx, y + 12.5, escx(st.name), { 'class': 'lbl', 'text-anchor': 'middle' });
+      g += chairSeat(cx, cy);
+      if (st) {
+        var color = v.color || groupColor(st.group || 0);
+        g += '<g class="stu" transform="translate(' + r1(cx) + ',' + r1(cy) + ')"><g class="stu-in">' + studentFigure(st, color) + '</g></g>';
+      } else {
+        g += '<g class="add" transform="translate(' + r1(cx) + ',' + r1(cy) + ')">' +
+          circ(0, 2, 16, '#fff', { stroke: '#c9c9c7', 'stroke-width': 1.2, 'stroke-dasharray': '3 3' }) +
+          path('M-6 2H6M0 -4V8', 'none', { stroke: '#9a9a98', 'stroke-width': 1.6, 'stroke-linecap': 'round' }) + '</g>';
+      }
+      g += chairBack(cx, cy);
+      if (v.badge) {
+        var bw = Math.max(26, v.badge.length * 7 + 12);
+        g += '<g class="badge ' + (v.badgeTone || '') + '" transform="translate(' + r1(x + L.DW - bw - 2) + ',' + r1(y - 15) + ')">' +
+          rect(0, 0, bw, 17, 8.5, null, { 'class': 'badge-bg' }) + txt(bw / 2, 12.2, escx(v.badge), { 'text-anchor': 'middle', 'class': 'badge-tx' }) + '</g>';
+      }
+      if (v.chip) {
+        g += '<g class="chip ' + (v.chipTone || '') + '" transform="translate(' + r1(cx) + ',' + r1(cy - 2) + ')">' +
+          rect(-17, -10, 34, 20, 10, null, { 'class': 'chip-bg' }) + txt(0, 4.4, escx(v.chip), { 'text-anchor': 'middle', 'class': 'chip-tx' }) + '</g>';
+      }
+      if (data.seatNos) g += txt(x + 6, y + L.DD - 5, label, { 'class': 'seatno' });
+      return g + '</g>';
+    }
     // 阴影层
     var sh = '';
     for (var r = 0; r < data.rows; r++) {
@@ -1321,47 +1423,14 @@ var ART = (function () {
         sh += seatShadow(L.headX(c), L.headY(r));
       }
     }
+    podK.forEach(function (k) { var q = L.pos(k); sh += deskShadow(L, q.x, q.y) + seatShadow(q.x + L.DW / 2, q.y + L.DD + 2); });
     out += '<g filter="url(#fxShadow)">' + sh + '</g>';
+    // 讲台两边的桌子
+    if (podK.length) out += '<g class="row pod-row">' + podK.map(function (k) { return cell(k, '讲台' + (k.charAt(3) === 'L' ? '左' : '右')); }).join('') + '</g>';
     // 课桌 + 学生，逐行绘制（越往下越靠近镜头）
     for (var r2 = 0; r2 < data.rows; r2++) {
       var rowS = '';
-      for (var c2 = 0; c2 < cols; c2++) {
-        var key = r2 + '-' + c2;
-        var st = data.seats[key];
-        var x = L.seatX(c2), y = L.seatY(r2), cx = L.headX(c2), cy = L.headY(r2);
-        var v = (st && data.views && data.views[st.id]) || {};
-        var cls = 'seat' + (st ? ' has' : ' empty') + (v.cls ? ' ' + v.cls : '');
-        rowS += '<g class="' + cls + '" data-seat="' + key + '"' + (st ? ' data-sid="' + st.id + '"' : '') + '>';
-        rowS += rect(x + 2, y - 6, L.DW - 4, L.ROW - 4, 10, 'transparent', { 'class': 'hit' });
-        rowS += '<g class="desk-g">' + desk(L, x, y);
-        if (v.tint) rowS += rect(x, y, L.DW, L.DD, 3, v.tint, { 'class': 'tint' });
-        rowS += deskProps(x, y, L.DW, hash(key + (st ? st.id : '')));
-        rowS += '</g>';
-        if (st) {
-          rowS += txt(cx, y + 12.5, escx(st.name), { 'class': 'lbl', 'text-anchor': 'middle' });
-        }
-        rowS += chairSeat(cx, cy);
-        if (st) {
-          var color = v.color || groupColor(st.group || 0);
-          rowS += '<g class="stu" transform="translate(' + r1(cx) + ',' + r1(cy) + ')"><g class="stu-in">' + studentFigure(st, color) + '</g></g>';
-        } else {
-          rowS += '<g class="add" transform="translate(' + r1(cx) + ',' + r1(cy) + ')">' +
-            circ(0, 2, 16, '#fff', { stroke: '#c9c9c7', 'stroke-width': 1.2, 'stroke-dasharray': '3 3' }) +
-            path('M-6 2H6M0 -4V8', 'none', { stroke: '#9a9a98', 'stroke-width': 1.6, 'stroke-linecap': 'round' }) + '</g>';
-        }
-        rowS += chairBack(cx, cy);
-        if (v.badge) {
-          var bw = Math.max(26, v.badge.length * 7 + 12);
-          rowS += '<g class="badge ' + (v.badgeTone || '') + '" transform="translate(' + r1(x + L.DW - bw - 2) + ',' + r1(y - 15) + ')">' +
-            rect(0, 0, bw, 17, 8.5, null, { 'class': 'badge-bg' }) + txt(bw / 2, 12.2, escx(v.badge), { 'text-anchor': 'middle', 'class': 'badge-tx' }) + '</g>';
-        }
-        if (v.chip) {
-          rowS += '<g class="chip ' + (v.chipTone || '') + '" transform="translate(' + r1(cx) + ',' + r1(cy - 2) + ')">' +
-            rect(-17, -10, 34, 20, 10, null, { 'class': 'chip-bg' }) + txt(0, 4.4, escx(v.chip), { 'text-anchor': 'middle', 'class': 'chip-tx' }) + '</g>';
-        }
-        if (data.seatNos) rowS += txt(x + 6, y + L.DD - 5, (r2 + 1) + '-' + (c2 + 1), { 'class': 'seatno' });
-        rowS += '</g>';
-      }
+      for (var c2 = 0; c2 < cols; c2++) rowS += cell(r2 + '-' + c2, (r2 + 1) + '-' + (c2 + 1));
       out += '<g class="row">' + rowS + '</g>';
     }
     out += txt(L.W - L.WT - 10, L.H - 4.5, 'Developed by @赛博老爸', { 'class': 'wm', 'text-anchor': 'end' });
@@ -1379,7 +1448,7 @@ var ART = (function () {
 /* =========================================================
    CORE · 工具函数、存储、数据模型、示例数据、统计
    ========================================================= */
-var VERSION = '1.0.0';
+var VERSION = '1.1.0';
 var STORE_KEY = 'bzr-workbench-v1';
 
 /* ---------- 工具 ---------- */
@@ -1435,7 +1504,12 @@ function load() {
 }
 function migrate(s) {
   var d = defaultState();
-  s.settings = Object.assign({}, d.settings, s.settings || {});
+  var old = s.settings || {}, legacy = old.cols === undefined;
+  s.settings = Object.assign({}, d.settings, old);
+  // v1.0 只有双人同桌：pairs = 组数。老数据沿用原来的排列，改为「自己设定」以免座位被自动调整
+  if (legacy) { s.settings.cols = +old.pairs || 4; s.settings.desk = 2; s.settings.layout = 'manual'; }
+  delete s.settings.pairs;
+  fixLayoutSettings(s.settings);
   s.settings.ai = Object.assign({}, d.settings.ai, s.settings.ai || {});
   s.settings.teacher = Object.assign({}, d.settings.teacher, s.settings.teacher || {});
   s.settings.countdown = Object.assign({}, d.settings.countdown, s.settings.countdown || {});
@@ -1463,12 +1537,117 @@ function migrate(s) {
     });
     if (!Array.isArray(c.msgs)) c.msgs = [];
   });
+  var valid = {}, taken = {};
+  seatKeys(s.settings, 'row').concat(podKeys(s.settings)).forEach(function (k) { valid[k] = 1; });
   s.students.forEach(function (st) {
     if (!st.parents) st.parents = [];
     if (!st.tags) st.tags = [];
     if (!st.comments) st.comments = [];
+    if (st.seat && (!valid[st.seat] || taken[st.seat])) st.seat = null;
+    if (st.seat) { taken[st.seat] = 1; st.group = groupOfSeat(st.seat, s.settings); }
   });
   return s;
+}
+
+/* ---------- 桌椅排列 ----------
+   settings.desk   每张桌子坐几人：1 单人单列 / 2 双人同桌 / 3 三人一排
+   settings.cols   每排几张桌子（座位列数 = cols × desk）
+   settings.rows   排数（前后）
+   settings.layout 'auto' 按人数自动排 / 'manual' 自己设定
+   settings.seatOrder 新同学、坐不下的同学按什么顺序找空位：'row' 横着 / 'col' 竖着
+   settings.podL / podR 讲台左边、右边各放几张单人桌（0–2，默认 0），给需要多关注的同学
+   座位编号 "r-c"：r 第几排（从 0 起，0 最靠讲台），c 第几列（从 0 起，从左往右）
+   讲台边的座位编号 "podL1" "podL2" "podR1" "podR2"：1 号紧挨讲桌，2 号在外侧。
+   讲台边的座位不参与自动安排：新同学入座、按学号重排、随机打乱、优带弱、男女同桌都不会动到它，只能手动拖进去或在档案里选 */
+var DESK_TYPES = [{ n: 1, t: '单人单列' }, { n: 2, t: '双人同桌' }, { n: 3, t: '三人一排' }];
+var ROW_RANGE = [2, 10], AUTO_MIN_ROWS = 4, POD_MAX = 2;
+function colRange(desk) { return desk === 1 ? [2, 12] : desk === 3 ? [1, 4] : [1, 6]; }
+function defaultCols(desk) { return desk === 1 ? 8 : desk === 3 ? 3 : 4; }
+function fixLayoutSettings(st) {
+  st.desk = [1, 2, 3].indexOf(+st.desk) >= 0 ? +st.desk : 2;
+  var cr = colRange(st.desk);
+  st.cols = clamp(Math.round(+st.cols) || defaultCols(st.desk), cr[0], cr[1]);
+  st.rows = clamp(Math.round(+st.rows) || 6, ROW_RANGE[0], ROW_RANGE[1]);
+  if (st.layout !== 'manual') st.layout = 'auto';
+  if (st.seatOrder !== 'col') st.seatOrder = 'row';
+  if (typeof st.room !== 'string') st.room = '';
+  st.podL = clamp(Math.round(+st.podL) || 0, 0, POD_MAX);
+  st.podR = clamp(Math.round(+st.podR) || 0, 0, POD_MAX);
+  return st;
+}
+function isPodSeat(k) { return /^pod[LR]\d$/.test(k || ''); }
+function podKeys(g) {
+  var out = [], i;
+  for (i = 1; i <= (g.podL || 0); i++) out.push('podL' + i);
+  for (i = 1; i <= (g.podR || 0); i++) out.push('podR' + i);
+  return out;
+}
+function seatCols(g) { g = g || S.settings; return g.cols * g.desk; }
+// 小组 = 一张桌子那一竖列；单人单列时相邻两列算一组（围巾颜色、小组积分用）
+function groupSpan(desk) { return desk === 1 ? 2 : desk; }
+// 讲台左边的同学算第一组，右边的算最后一组（就近）
+function groupOfSeat(key, g) {
+  g = g || S.settings;
+  if (isPodSeat(key)) return key.charAt(3) === 'L' ? 0 : Math.floor((g.cols * g.desk - 1) / groupSpan(g.desk));
+  return Math.floor(+String(key).split('-')[1] / groupSpan(g.desk));
+}
+// 全部座位编号。order='row' 从前往后、从左往右；order='col' 一组一组竖着来（单人单列就是一列一列）
+function seatKeys(g, order) {
+  var out = [], cols = g.cols * g.desk, r, c;
+  if (order !== 'col') { for (r = 0; r < g.rows; r++) for (c = 0; c < cols; c++) out.push(r + '-' + c); return out; }
+  var span = g.desk === 1 ? 1 : g.desk;
+  for (var c0 = 0; c0 < cols; c0 += span) for (r = 0; r < g.rows; r++) for (c = c0; c < Math.min(cols, c0 + span); c++) out.push(r + '-' + c);
+  return out;
+}
+// 按人数自动算排数和每排桌数。prefCols：尽量保持现在每排的桌数，只增减排数，避免全班大挪动
+function autoGrid(n, desk, prefCols) {
+  var cr = colRange(desk);
+  function rowsFor(c) { return Math.max(AUTO_MIN_ROWS, Math.ceil(n / (c * desk))); }
+  if (!n) return { rows: 6, cols: prefCols >= cr[0] && prefCols <= cr[1] ? prefCols : defaultCols(desk) };
+  if (prefCols >= cr[0] && prefCols <= cr[1] && Math.ceil(n / (prefCols * desk)) <= ROW_RANGE[1]) return { rows: rowsFor(prefCols), cols: prefCols };
+  // 打分：空座位少、排数接近 6、每排座位接近 8 个（人少时最少 4 排，这部分空位不算浪费）
+  var best = null;
+  for (var c = cr[0]; c <= cr[1]; c++) {
+    var r = rowsFor(c), per = c * desk; if (r > ROW_RANGE[1]) continue;
+    var score = (r * per - Math.max(n, AUTO_MIN_ROWS * per)) * 0.5 + Math.abs(r - 6) * 2 + Math.abs(per - 8) * 1.5;
+    if (!best || score < best.score) best = { rows: r, cols: c, score: score };
+  }
+  return best ? { rows: best.rows, cols: best.cols } : { rows: ROW_RANGE[1], cols: cr[1] };
+}
+function byNo(a, b) { return String(a.no || '').localeCompare(String(b.no || ''), 'zh', { numeric: true }) || a.name.localeCompare(b.name, 'zh'); }
+// 讲台边、且在新桌椅下仍然存在的座位上坐着的同学（这些同学不参与重排）
+function podKept(students, g) {
+  var ok = {}, out = {}; podKeys(g).forEach(function (k) { ok[k] = 1; });
+  students.forEach(function (s) { if (s.seat && ok[s.seat] && !out[s.seat]) out[s.seat] = s; });
+  return out;
+}
+// 计算新桌椅下每位同学的座位，返回 {学生id: 座位|null}，不改动数据
+// how='keep' 已坐好的同学不动，新桌椅里没有的座位上的同学按原来的前后顺序坐到空位；'row' / 'col' 全班按学号重新排
+// 讲台边的同学只要那个座位还在，就一直坐着不动
+// fillAll=true 时（在班级设置里点保存），原来没座位的同学也依次坐到剩下的空位
+function arrangeSeats(students, g, how, order, fillAll) {
+  var res = {}, keys = seatKeys(g, how === 'col' ? 'col' : how === 'row' ? 'row' : order);
+  var pk = podKept(students, g), keep = {};
+  Object.keys(pk).forEach(function (k) { res[pk[k].id] = k; keep[pk[k].id] = 1; });
+  var rest = students.filter(function (s) { return !keep[s.id]; });
+  if (how === 'row' || how === 'col') {
+    rest.slice().sort(byNo).forEach(function (s, i) { res[s.id] = keys[i] || null; });
+    return res;
+  }
+  var valid = {}, used = {}, over = [];
+  keys.forEach(function (k) { valid[k] = 1; });
+  var none = [];
+  rest.forEach(function (s) {
+    if (s.seat && valid[s.seat] && !used[s.seat]) { res[s.id] = s.seat; used[s.seat] = 1; }
+    else if (s.seat) over.push(s);
+    else { res[s.id] = null; none.push(s); }
+  });
+  function rc(k) { if (isPodSeat(k)) return -1; var p = k.split('-'); return +p[0] * 1000 + +p[1]; }
+  over.sort(function (a, b) { return rc(a.seat) - rc(b.seat); });
+  if (fillAll) over = over.concat(none.sort(byNo));
+  var free = keys.filter(function (k) { return !used[k]; });
+  over.forEach(function (s, i) { res[s.id] = free[i] || null; });
+  return res;
 }
 
 /* ---------- 默认设置 ---------- */
@@ -1495,7 +1674,7 @@ function defaultState() {
       school: '', className: '我的班级', stage: '初中', grade: '', term: '', termStart: '2026-09-01',
       countdown: { label: '期末考试', date: '2027-01-15' },
       teacher: { name: '老师', gender: 'F', subject: '' },
-      rows: 6, pairs: 4,
+      room: '', rows: 6, cols: 4, desk: 2, layout: 'auto', seatOrder: 'row', podL: 0, podR: 0,
       subjects: SUBJECT_PRESETS['初中'].slice(0, 6).map(function (x) { return { name: x[0], full: x[1] }; }),
       boardLeft: '1 语文  2 数学\n3 英语  4 物理\n5 体育  6 道法\n7 自习',
       boardRight: '值日：待安排\n作业：',
@@ -1517,7 +1696,7 @@ function demoState() {
   var s = defaultState();
   s.demo = true;
   var st = s.settings;
-  st.school = '星河实验中学'; st.className = '初二（3）班'; st.stage = '初中'; st.grade = '初二';
+  st.school = '星河实验中学'; st.className = '初二（3）班'; st.room = '明德楼 203'; st.stage = '初中'; st.grade = '初二';
   st.term = '2026—2027 学年 第一学期'; st.termStart = '2026-08-31';
   st.teacher = { name: '李老师', gender: 'F', subject: '数学' };
   st.subjects = [{ name: '语文', full: 120 }, { name: '数学', full: 120 }, { name: '英语', full: 120 }, { name: '物理', full: 100 }, { name: '道法', full: 100 }, { name: '历史', full: 100 }, { name: '生物', full: 100 }];
@@ -1583,7 +1762,7 @@ function demoState() {
       a > -0.4 ? pick(['基础扎实，偶有粗心，需要加强错题整理', '上课认真但不太敢举手发言', '文科较好，理科计算容易失分', '学习态度端正，成绩有上升空间']) :
         pick(['学习习惯还在养成，上课容易走神，需多鼓励', '基础比较薄弱，英语单词积累不够', '作业偶尔拖欠，需要家校配合督促']);
     var s1 = { id: 'stu' + (100 + i), name: name, gender: g, no: '2503' + pad2(i + 1), seat: seatsAll[i] || null, group: 0, birthday: by + '-' + pad2(bm) + '-' + pad2(bd), role: '', tags: tags, boarding: tags.indexOf('住校') >= 0, parents: parents, family: fam, familyNote: famNote, study: study, strengths: '', personality: pick(PERS), health: pick(HEALTH), note: '', comments: [], _a: a, _t: gauss() * 0.025 };
-    if (s1.seat) s1.group = Math.floor(+s1.seat.split('-')[1] / 2);
+    if (s1.seat) s1.group = groupOfSeat(s1.seat, st);
     students.push(s1);
   });
   // 学号按姓名排序重排更真实
@@ -2299,11 +2478,15 @@ var REDUCED = window.matchMedia && window.matchMedia('(prefers-reduced-motion: r
 
 function seatText(seat) {
   if (!seat) return '未排座';
+  if (isPodSeat(seat)) {
+    var side = seat.charAt(3), n = side === 'L' ? S.settings.podL : S.settings.podR;
+    return '讲台' + (side === 'L' ? '左' : '右') + '边' + (n > 1 ? (seat.charAt(4) === '1' ? '（靠讲桌）' : '（外侧）') : '');
+  }
   var p = seat.split('-');
   return '第' + (+p[0] + 1) + '排 第' + (+p[1] + 1) + '座';
 }
 function groupName(i) { return ['第一组', '第二组', '第三组', '第四组', '第五组', '第六组'][i] || ('第' + (i + 1) + '组'); }
-function autoGroups() { S.students.forEach(function (s) { if (s.seat) s.group = Math.floor(+s.seat.split('-')[1] / 2); }); }
+function autoGroups() { S.students.forEach(function (s) { if (s.seat) s.group = groupOfSeat(s.seat); }); }
 
 function boardData() {
   var st = S.settings, d = new Date();
@@ -2332,7 +2515,7 @@ function monthBirthdays() {
 function sceneExtra() {
   // 按舞台宽高比加宽教室两侧，让教室铺满横向空间
   var st = $('#stage'); if (!st) return 0;
-  var base = ART.layout(S.settings.rows, S.settings.pairs, 0);
+  var base = ART.layout(S.settings.rows, S.settings.cols, 0, S.settings.desk, { L: S.settings.podL, R: S.settings.podR });
   var W = st.clientWidth, H = st.clientHeight;
   if (!W || !H) return 0;
   var s = clamp(Math.max((H - 48 - 62) / base.H, 0.68), 0.3, 1.2);
@@ -2375,7 +2558,7 @@ function drawScene() {
   var t = S.settings.teacher;
   Cls.extra = sceneExtra();
   var res = ART.scene({
-    rows: S.settings.rows, pairs: S.settings.pairs, extra: Cls.extra, subjects: S.settings.subjects.map(function (x) { return x.name; }), seats: seatMap(), views: buildViews(),
+    rows: S.settings.rows, cols: S.settings.cols, desk: S.settings.desk, pod: { L: S.settings.podL, R: S.settings.podR }, extra: Cls.extra, subjects: S.settings.subjects.map(function (x) { return x.name; }), seats: seatMap(), views: buildViews(),
     teacher: { gender: t.gender, label: t.name + ' · 班主任' }, board: boardData(), seatNos: Cls.mode === 'seat'
   });
   Cls.L = res.L;
@@ -2427,10 +2610,7 @@ function tickClock() {
   g.querySelector('.clock-h').setAttribute('transform', 'rotate(' + h + ' ' + cx + ' ' + cy + ')');
   g.querySelector('.clock-m').setAttribute('transform', 'rotate(' + m + ' ' + cx + ' ' + cy + ')');
 }
-function headPos(seat) {
-  var p = seat.split('-'), L = Cls.L;
-  return { x: L.headX(+p[1]), y: L.headY(+p[0]) };
-}
+function headPos(seat) { return Cls.L.head(seat); }
 function floatAt(seat, text, color) {
   var fx = $('.scene-svg .fx-layer'); if (!fx || !seat) return;
   var p = headPos(seat);
@@ -2568,46 +2748,60 @@ function moveSeat(from, to) {
   a.seat = to; if (b) b.seat = from;
   autoGroups(); save(); drawScene();
 }
-function allSeats() { var out = []; for (var r = 0; r < S.settings.rows; r++) for (var c = 0; c < S.settings.pairs * 2; c++) out.push(r + '-' + c); return out; }
+function allSeats() { return seatKeys(S.settings, 'row'); }
 function snapshotSeats() { Cls.seatUndo = S.students.map(function (s) { return [s.id, s.seat, s.group]; }); }
 function shuffleArr(a) { for (var i = a.length - 1; i > 0; i--) { var j = Math.floor(Math.random() * (i + 1)); var t = a[i]; a[i] = a[j]; a[j] = t; } return a; }
-function placePairs(pairs) {
-  // pairs: [[stuA, stuB|null], ...] 依次放进同桌位（先打乱双人桌顺序以免固定前后）
-  var desks = [];
-  for (var r = 0; r < S.settings.rows; r++) for (var p = 0; p < S.settings.pairs; p++) desks.push([r + '-' + (p * 2), r + '-' + (p * 2 + 1)]);
-  S.students.forEach(function (s) { s.seat = null; });
-  pairs.forEach(function (pr, i) {
+// 参与排座的同学：坐在讲台边的不动
+function seatable() { return S.students.filter(function (s) { return !isPodSeat(s.seat); }); }
+function placeDesks(groups) {
+  // groups: [[学生, 学生|null, ...], ...] 每组坐同一张桌子；依次放进桌子（调用前先打乱组的顺序，免得固定前后）
+  var st = S.settings, desks = [];
+  for (var r = 0; r < st.rows; r++) for (var p = 0; p < st.cols; p++) {
+    var d = []; for (var i = 0; i < st.desk; i++) d.push(r + '-' + (p * st.desk + i)); desks.push(d);
+  }
+  seatable().forEach(function (s) { s.seat = null; });
+  groups.forEach(function (g, i) {
     var d = desks[i]; if (!d) return;
-    if (pr[0]) pr[0].seat = d[0];
-    if (pr[1]) pr[1].seat = d[1];
+    g.forEach(function (s, j) { if (s && d[j]) s.seat = d[j]; });
   });
   autoGroups(); save(); drawScene();
 }
 UI.act['seat-shuffle'] = function () {
   snapshotSeats();
-  var list = shuffleArr(S.students.slice()), seats = allSeats();
-  S.students.forEach(function (s) { s.seat = null; });
+  var list = shuffleArr(seatable()), seats = allSeats();
+  list.forEach(function (s) { s.seat = null; });
   list.forEach(function (s, i) { s.seat = seats[i] || null; });
   autoGroups(); save(); drawScene(); UI.toast('已随机打乱座位');
 };
 UI.act['seat-mentor'] = function () {
   var ex = latestExam(); if (!ex) { UI.toast('还没有考试成绩，先去录入一次吧'); return; }
   snapshotSeats();
-  var rm = rankMap(ex);
-  var list = S.students.slice().sort(function (a, b) { return (rm[a.id] ? rm[a.id].rank : 999) - (rm[b.id] ? rm[b.id].rank : 999); });
-  var pairs = [];
-  while (list.length) { var a = list.shift(), b = list.length ? list.pop() : null; pairs.push([a, b]); }
-  placePairs(shuffleArr(pairs));
+  var rm = rankMap(ex), k = S.settings.desk;
+  var list = seatable().sort(function (a, b) { return (rm[a.id] ? rm[a.id].rank : 999) - (rm[b.id] ? rm[b.id].rank : 999); });
+  var groups = [];
+  // 双人桌：第 1 名配最后 1 名；三人桌：前、中、后各一人
+  while (list.length) {
+    var g = [list.shift()];
+    if (k >= 2 && list.length) g.push(list.pop());
+    if (k >= 3 && list.length) g.splice(1, 0, list.splice(Math.floor(list.length / 2), 1)[0]);
+    groups.push(g);
+  }
+  placeDesks(shuffleArr(groups));
   UI.toast('已按「' + ex.name + '」排名：前后搭配做同桌');
 };
 UI.act['seat-gender'] = function () {
   snapshotSeats();
-  var boys = shuffleArr(S.students.filter(function (s) { return s.gender !== 'F'; })), girls = shuffleArr(S.students.filter(function (s) { return s.gender === 'F'; }));
-  var pairs = [];
-  while (boys.length && girls.length) pairs.push(Math.random() < 0.5 ? [boys.pop(), girls.pop()] : [girls.pop(), boys.pop()]);
+  var k = S.settings.desk;
+  var pool = seatable(), boys = shuffleArr(pool.filter(function (s) { return s.gender !== 'F'; })), girls = shuffleArr(pool.filter(function (s) { return s.gender === 'F'; }));
+  var groups = [];
+  while (boys.length && girls.length) {
+    var first = Math.random() < 0.5 ? boys : girls, second = first === boys ? girls : boys, g = [];
+    for (var i = 0; i < k; i++) { var src = i % 2 === 0 ? first : second; if (!src.length) src = src === boys ? girls : boys; if (src.length) g.push(src.pop()); }
+    groups.push(g);
+  }
   var rest = boys.concat(girls);
-  while (rest.length) pairs.push([rest.shift(), rest.length ? rest.shift() : null]);
-  placePairs(shuffleArr(pairs));
+  while (rest.length) groups.push(rest.splice(0, k));
+  placeDesks(shuffleArr(groups));
   UI.toast('已安排男女同桌');
 };
 UI.act['seat-undo'] = function () {
@@ -2617,15 +2811,20 @@ UI.act['seat-undo'] = function () {
   Cls.seatUndo = null; save(); drawScene(); UI.toast('已撤销');
 };
 UI.act['seat-print'] = function () {
-  var m = seatMap(), cols = S.settings.pairs * 2, h = '';
-  h += '<!doctype html><html><head><meta charset="utf-8"><title>' + esc(S.settings.className) + ' 座位表</title><style>body{font-family:"PingFang SC","Microsoft YaHei",sans-serif;padding:24px;color:#171717}h1{font-size:20px;text-align:center;margin:0 0 4px}p{text-align:center;color:#777;margin:0 0 18px;font-size:12px}.pod{width:40%;margin:0 auto 18px;text-align:center;border:1.5px solid #171717;border-radius:8px;padding:8px;font-weight:600}table{border-collapse:separate;border-spacing:6px;margin:0 auto}td{width:84px;height:46px;border:1px solid #cfcfcc;border-radius:6px;text-align:center;font-size:14px}td.gap{border:0;width:18px}td small{display:block;color:#999;font-size:10px}td.e{color:#ccc}@media print{body{padding:0}}</style></head><body>';
-  h += '<h1>' + esc(S.settings.className) + ' 座位表</h1><p>' + esc(S.settings.school || '') + ' · ' + todayStr() + ' · 讲台在上方</p><div class="pod">讲 台</div><table>';
+  var m = seatMap(), cols = seatCols(), k = S.settings.desk, h = '';
+  h += '<!doctype html><html><head><meta charset="utf-8"><title>' + esc(S.settings.className) + ' 座位表</title><style>body{font-family:"PingFang SC","Microsoft YaHei",sans-serif;padding:24px;color:#171717}h1{font-size:20px;text-align:center;margin:0 0 4px}p{text-align:center;color:#777;margin:0 0 18px;font-size:12px}.podrow{display:flex;justify-content:center;align-items:center;gap:6px;margin:0 auto 18px}.podrow .c{width:84px;height:46px;border:1px solid #cfcfcc;border-radius:6px;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:14px}.podrow .c.e{color:#ccc}.podrow .c small{color:#999;font-size:10px}.pod{width:40%;text-align:center;border:1.5px solid #171717;border-radius:8px;padding:8px;font-weight:600;margin:0 18px}table{border-collapse:separate;border-spacing:6px;margin:0 auto}td{width:84px;height:46px;border:1px solid #cfcfcc;border-radius:6px;text-align:center;font-size:14px}td.gap{border:0;width:18px}td small{display:block;color:#999;font-size:10px}td.e{color:#ccc}@media print{body{padding:0}}</style></head><body>';
+  h += '<h1>' + esc(S.settings.className) + ' 座位表</h1><p>' + esc([S.settings.school, S.settings.room, todayStr()].filter(Boolean).join(' · ')) + ' · 讲台在上方</p>';
+  function podCell(k) { var st = m[k]; return st ? '<div class="c">' + esc(st.name) + '<small>' + esc(st.no || '') + '</small></div>' : '<div class="c e">空</div>'; }
+  var lk = [], rk = [], i2;
+  for (i2 = S.settings.podL; i2 >= 1; i2--) lk.push(podCell('podL' + i2));
+  for (i2 = 1; i2 <= S.settings.podR; i2++) rk.push(podCell('podR' + i2));
+  h += '<div class="podrow">' + lk.join('') + '<div class="pod">讲 台</div>' + rk.join('') + '</div><table>';
   for (var r = 0; r < S.settings.rows; r++) {
     h += '<tr>';
     for (var c = 0; c < cols; c++) {
       var st = m[r + '-' + c];
       h += st ? '<td>' + esc(st.name) + '<small>' + esc(st.no || '') + '</small></td>' : '<td class="e">空</td>';
-      if (c % 2 === 1 && c < cols - 1) h += '<td class="gap"></td>';
+      if (c % k === k - 1 && c < cols - 1) h += '<td class="gap"></td>';
     }
     h += '</tr>';
   }
@@ -2721,7 +2920,8 @@ function renderDock() {
         '<button class="btn btn-sm btn-light" data-act="go" data-page="analysis">完整分析</button></div>';
     }
   } else if (Cls.mode === 'seat') {
-    sub = '<div class="subbar"><span class="muted">拖动学生换座，或先后点两个座位</span><button class="btn btn-sm btn-light" data-act="seat-shuffle">' + ICON.shuffle + '随机打乱</button><button class="btn btn-sm btn-light" data-act="seat-mentor">优带弱同桌</button><button class="btn btn-sm btn-light" data-act="seat-gender">男女同桌</button><button class="btn btn-sm btn-ghost" data-act="seat-undo">撤销</button><button class="btn btn-sm btn-dark" data-act="seat-print">' + ICON.print + '打印座位表</button></div>';
+    var pairBtns = S.settings.desk > 1 ? '<button class="btn btn-sm btn-light" data-act="seat-mentor">优带弱同桌</button><button class="btn btn-sm btn-light" data-act="seat-gender">男女同桌</button>' : '';
+    sub = '<div class="subbar"><span class="muted">拖动学生换座，或先后点两个座位</span><button class="btn btn-sm btn-light" data-act="seat-shuffle">' + ICON.shuffle + '随机打乱</button>' + pairBtns + '<button class="btn btn-sm btn-ghost" data-act="seat-undo">撤销</button><button class="btn btn-sm btn-light" data-act="class-set">桌椅排列</button><button class="btn btn-sm btn-dark" data-act="seat-print">' + ICON.print + '打印座位表</button></div>';
   }
   d.innerHTML = sub + '<div class="seg">' + MODES.map(function (m) { return '<button class="' + (m.id === Cls.mode ? 'on' : '') + '" data-act="cls-mode" data-mode="' + m.id + '">' + m.t + '</button>'; }).join('') + '</div>';
 }
@@ -2777,10 +2977,11 @@ UI.register('class', {
     if (!Cls.attDate) Cls.attDate = todayStr();
     main.innerHTML = '<div class="class-page">' +
       '<div class="stage" id="stage"><div class="stage-inner" id="stageInner"></div></div>' +
-      '<div class="class-title">' + esc(S.settings.className) + '<small>' + esc(S.settings.school || '') + (wk ? (S.settings.school ? ' · ' : '') + '第 ' + wk + ' 周' : '') + '</small></div>' +
+      '<div class="class-title">' + esc(S.settings.className) + '<small>' + esc([S.settings.school, S.settings.room, wk ? '第 ' + wk + ' 周' : ''].filter(Boolean).join(' · ')) + '</small></div>' +
       (S.demo ? '<div class="demo-bar">正在查看示例班级<button class="btn btn-xs btn-dark" data-act="demo-clear">开始录入我的班级</button></div>' : '') +
       '<div class="top-tools"><button class="btn btn-dark" data-act="pick">' + ICON.dice + '随机点名</button>' +
       '<div class="zoom"><button data-act="zoom-out" title="缩小" aria-label="缩小">' + ICON.zout + '</button><button class="zoom-fit" data-act="zoom-fit" title="恢复默认大小">适应</button><button data-act="zoom-in" title="放大" aria-label="放大">' + ICON.zin + '</button></div>' +
+      '<button class="btn btn-light btn-icon" data-act="class-set" title="班级设置：班名、教室、桌椅排列" aria-label="班级设置">' + ICON.gear + '</button>' +
       '<button class="btn btn-light btn-icon rail-toggle" data-act="toggle-rail" title="班级概况" aria-label="班级概况">' + ICON.side + '</button></div>' +
       '<div class="dock" id="dock"></div><div id="pickCard"></div>' +
       '<div class="empty-class hide" id="emptyClass">' + ART.teacherAvatar(S.settings.teacher, 64) + '<div><div style="font-weight:700;font-size:15px">教室还空着</div><div class="muted" style="font-size:13px;margin:2px 0 10px">点任意一个座位添加学生，或者从 Excel 一次导入整班名单</div>' +
@@ -3004,8 +3205,10 @@ function openStudentForm(st, opts) {
   var d = st ? deepClone(st) : { id: uid('stu'), name: '', gender: 'M', no: nextNo(), seat: opts.seat || firstEmptySeat(), group: 0, birthday: '', role: '', tags: [], boarding: false, parents: [{ name: '', rel: '母亲', phone: '', job: '' }], family: '双亲家庭', familyNote: '', study: '', strengths: '', personality: '', health: '', note: '', comments: [] };
   while (d.parents.length < 2) d.parents.push({ name: '', rel: d.parents.length ? '父亲' : '母亲', phone: '', job: '' });
   Stu.form = d;
-  var seats = allSeats(), occ = seatMap();
-  var seatOpts = '<option value="">未排座</option>' + seats.map(function (k) {
+  var seats = podKeys(S.settings).concat(allSeats()), occ = seatMap();
+  // 「按人数自动排」且教室坐满时，新同学默认「自动加座位」：保存后教室自动加一排
+  var autoOpt = isNew && !d.seat && S.settings.layout === 'auto';
+  var seatOpts = (autoOpt ? '<option value="auto" selected>自动加座位</option>' : '') + '<option value="">未排座</option>' + seats.map(function (k) {
     var o = occ[k], taken = o && o.id !== d.id;
     return '<option value="' + k + '"' + (d.seat === k ? ' selected' : '') + '>' + seatText(k) + (taken ? '（' + esc(o.name) + (isNew ? '，将挪到空位）' : '，将互换）') : '') + '</option>';
   }).join('');
@@ -3049,7 +3252,7 @@ function nextNo() {
   var n = String(max + 1); while (n.length < w) n = '0' + n;
   return pre + n;
 }
-function firstEmptySeat() { var m = seatMap(), a = allSeats(); for (var i = 0; i < a.length; i++) if (!m[a[i]]) return a[i]; return null; }
+function firstEmptySeat() { var m = seatMap(), a = seatKeys(S.settings, S.settings.seatOrder); for (var i = 0; i < a.length; i++) if (!m[a[i]]) return a[i]; return null; }
 UI.act['f-gender'] = function (el) { Stu.form.gender = el.getAttribute('data-g'); $$('#fGender button').forEach(function (b) { b.classList.toggle('on', b === el); }); };
 UI.act['f-board'] = function (el) { Stu.form.boarding = el.getAttribute('data-v') === '1'; $$('button', el.parentNode).forEach(function (b) { b.classList.toggle('on', b === el); }); };
 UI.act['f-tag'] = function (el) {
@@ -3070,7 +3273,7 @@ UI.act['stu-save'] = function (el) {
   d.name = $('#fName').value.trim();
   if (!d.name) { $('#fName').focus(); UI.toast('请填写姓名'); return; }
   d.no = $('#fNo').value.trim(); d.birthday = $('#fBday').value; d.role = $('#fRole').value.trim();
-  var seat = $('#fSeat').value || null;
+  var seatV = $('#fSeat').value, wantAuto = seatV === 'auto', seat = wantAuto ? null : (seatV || null);
   d.family = $('#fFam').value; d.familyNote = $('#fFamNote').value.trim(); d.study = $('#fStudy').value.trim();
   d.personality = $('#fPers').value.trim(); d.health = $('#fHealth').value.trim(); d.note = $('#fNote').value.trim();
   d.parents = [0, 1].map(function (i) { return { name: $('#fP' + i + 'n').value.trim(), rel: $('#fP' + i + 'r').value.trim(), phone: $('#fP' + i + 'p').value.trim(), job: $('#fP' + i + 'j').value.trim() }; }).filter(function (p) { return p.name || p.phone; });
@@ -3086,6 +3289,8 @@ UI.act['stu-save'] = function (el) {
   d.seat = seat;
   if (isNew) S.students.push(d);
   else { var i = S.students.indexOf(old); S.students[i] = d; }
+  if (isNew) reflowAuto();
+  if (wantAuto) d.seat = firstEmptySeat();
   autoGroups(); save();
   var more = isNew && $('#fMore') && $('#fMore').checked;
   UI.closeModal();
@@ -3102,6 +3307,7 @@ UI.act['stu-del'] = function (el) {
     S.records = S.records.filter(function (p) { return p.sid !== st.id; });
     S.exams.forEach(function (e) { delete e.scores[st.id]; });
     Object.keys(S.attendance).forEach(function (k) { delete S.attendance[k][st.id]; });
+    reflowAuto(); autoGroups();
     save(); UI.closeDrawer(); refreshAfterChange(); UI.toast('已删除 ' + st.name);
   }, true);
 };
@@ -3294,19 +3500,22 @@ UI.act['imp-template'] = function () { downloadFile('学生名单模板.csv', to
 UI.act['imp-go'] = function () {
   var r = impParse();
   if (r.map.name === undefined) { UI.toast('没有识别到「姓名」列'); return; }
-  var autoSeat = $('#impSeat').checked, added = 0, skipped = 0;
+  var autoSeat = $('#impSeat').checked, added = 0, skipped = 0, fresh = [];
   r.rows.forEach(function (row) {
     function g(k) { return r.map[k] !== undefined ? (row[r.map[k]] || '').trim() : ''; }
     var name = g('name'); if (!name) return;
     if (S.students.some(function (s) { return s.name === name && (!g('no') || s.no === g('no')); })) { skipped++; return; }
     var bd = g('birthday').replace(/[年月\/.]/g, '-').replace(/日/g, '');
     var bp = bd.split('-'); bd = bp.length === 3 ? bp[0] + '-' + pad2(+bp[1]) + '-' + pad2(+bp[2]) : '';
-    var st = { id: uid('stu'), name: name, gender: /女|f/i.test(g('gender')) ? 'F' : 'M', no: g('no') || nextNo(), seat: autoSeat ? firstEmptySeat() : null, group: 0, birthday: bd, role: g('role'), tags: [], boarding: false,
+    var st = { id: uid('stu'), name: name, gender: /女|f/i.test(g('gender')) ? 'F' : 'M', no: g('no') || nextNo(), seat: null, group: 0, birthday: bd, role: g('role'), tags: [], boarding: false,
       parents: g('p0name') || g('p0phone') ? [{ name: g('p0name'), rel: g('p0rel') || '家长', phone: g('p0phone'), job: '' }] : [],
       family: FAMILY_TYPES.indexOf(g('family')) >= 0 ? g('family') : (g('family') ? '其他' : '双亲家庭'), familyNote: FAMILY_TYPES.indexOf(g('family')) >= 0 ? g('familyNote') : [g('family'), g('familyNote')].filter(Boolean).join('；'),
       study: g('study'), strengths: '', personality: g('personality'), health: g('health'), note: g('note'), comments: [] };
-    S.students.push(st); added++;
+    S.students.push(st); fresh.push(st); added++;
   });
+  // 先按新人数调整桌椅（自动排时），再依次坐进空位
+  reflowAuto();
+  if (autoSeat) fresh.forEach(function (st) { st.seat = firstEmptySeat(); });
   autoGroups(); save(); UI.closeModal(); refreshAfterChange();
   UI.toast('导入 ' + added + ' 人' + (skipped ? '，跳过重复 ' + skipped + ' 人' : ''));
 };
@@ -3317,6 +3526,167 @@ UI.act['stu-export'] = function () {
     rows.push([s.no, s.name, s.gender === 'F' ? '女' : '男', s.birthday, s.role, seatText(s.seat), p.name, p.rel, p.phone, s.family, s.familyNote, s.study, s.personality, s.health, (s.tags || []).join('、'), pointsOf(s.id)]);
   });
   downloadFile(S.settings.className + '-学生名单.csv', toCSV(rows), 'text/csv;charset=utf-8');
+};
+
+/* =========================================================
+   班级设置 · 班级名称、教室、桌椅排列（单人单列 / 双人同桌 / 三人一排，
+   按人数自动排或自己设定行列，学号顺序入座），以及加减学生时自动调整座位
+   ========================================================= */
+var CS = null; // 弹窗里的草稿：{ d: {rows, cols, desk, layout, how, pref} }
+
+/* ---------- 应用到数据 ---------- */
+// g: {rows, cols, desk[, podL, podR, layout]}；how: 'keep' | 'row' | 'col'（见 core.js arrangeSeats）
+function applyLayout(g, how, fillAll) {
+  var st = S.settings;
+  if (g.podL === undefined) { g.podL = st.podL; g.podR = st.podR; }
+  var res = arrangeSeats(S.students, g, how, st.seatOrder, fillAll);
+  st.rows = g.rows; st.cols = g.cols; st.desk = g.desk; st.podL = g.podL; st.podR = g.podR;
+  if (g.layout) st.layout = g.layout;
+  if (how === 'row' || how === 'col') st.seatOrder = how;
+  S.students.forEach(function (s) { s.seat = res[s.id] || null; });
+  autoGroups();
+  Cls.seatUndo = null; Cls.pickedSeat = null; Cls.view.fit = true;
+}
+// 不坐讲台边、需要排进普通座位的人数
+function deskCount(g) { return S.students.length - Object.keys(podKept(S.students, g)).length; }
+// 「按人数自动排」时，学生人数变了就增减排数；已坐好的同学不动
+function reflowAuto() {
+  var st = S.settings; if (st.layout !== 'auto') return false;
+  var g = autoGrid(deskCount(st), st.desk, st.cols);
+  if (g.rows === st.rows && g.cols === st.cols) return false;
+  applyLayout({ rows: g.rows, cols: g.cols, desk: st.desk }, 'keep');
+  return true;
+}
+
+/* ---------- 座位预览（弹窗、设置页共用） ---------- */
+function seatPreviewHTML(g, res, maxW, maxH) {
+  var per = g.cols * g.desk, occ = {};
+  S.students.forEach(function (s) { if (res[s.id]) occ[res[s.id]] = s; });
+  var gapD = g.desk === 1 ? 6 : 10, gapS = 2;
+  var q = Math.floor((maxW - (g.cols - 1) * gapD - g.cols * (g.desk - 1) * gapS) / per);
+  q = clamp(Math.min(q, Math.floor(maxH / g.rows) - 4), 7, 22);
+  function sq(k) { var s = occ[k]; return s ? '<i class="on" title="' + esc(s.name) + '"></i>' : '<i></i>'; }
+  var pl = '', pr = '', i0;
+  for (i0 = g.podL || 0; i0 >= 1; i0--) pl += sq('podL' + i0);
+  for (i0 = 1; i0 <= (g.podR || 0); i0++) pr += sq('podR' + i0);
+  var h = '<div class="cs-seats" style="--q:' + q + 'px;--gd:' + gapD + 'px">' +
+    '<div class="cs-podrow"><div class="cs-desk pod">' + pl + '</div><div class="cs-pod">讲台</div><div class="cs-desk pod">' + pr + '</div></div>';
+  for (var r = 0; r < g.rows; r++) {
+    h += '<div class="cs-row">';
+    for (var p = 0; p < g.cols; p++) {
+      h += '<div class="cs-desk">';
+      for (var i = 0; i < g.desk; i++) h += sq(r + '-' + (p * g.desk + i));
+      h += '</div>';
+    }
+    h += '</div>';
+  }
+  return h + '</div>';
+}
+
+/* ---------- 弹窗 ---------- */
+function csGrid() {
+  var d = CS.d;
+  if (d.layout === 'auto') { var g = autoGrid(deskCount(d), d.desk, d.pref); d.rows = g.rows; d.cols = g.cols; }
+  return d;
+}
+var CS_HOW = [
+  { id: 'keep', t: '保持现在的座位', hint: '已经坐好的同学位置不变；桌椅变少时坐不下的同学、还没座位的同学，按顺序坐到空位上' },
+  { id: 'row', t: '按学号横着排', hint: '横着排：1 号坐第一排最左边，往右依次坐，坐满一排再坐下一排' },
+  { id: 'col', t: '按学号一组一组竖着排', hint: '竖着排：先坐满第一组，从前往后，再坐下一组' }
+];
+function csLayoutHTML() {
+  var d = csGrid(), n = S.students.length, per = d.cols * d.desk, pods = d.podL + d.podR, cap = d.rows * per + pods, cr = colRange(d.desk);
+  var res = arrangeSeats(S.students, d, d.how, S.settings.seatOrder, true);
+  var noSeat = S.students.filter(function (s) { return !res[s.id]; }).length;
+  var how = CS_HOW.filter(function (x) { return x.id === d.how; })[0];
+  var hint = how.hint;
+  if (d.how === 'col' && d.desk === 1) hint = '竖着排：先坐满第一列，从前往后，再坐下一列';
+  var h = '<div class="cs-grid"><div class="cs-ctrl">';
+  h += '<div class="field"><label>每张桌子</label><div class="seg light lg">' + DESK_TYPES.map(function (t) {
+    return '<button type="button" class="' + (d.desk === t.n ? 'on' : '') + '" data-act="cs-desk" data-n="' + t.n + '">' + t.t + '</button>';
+  }).join('') + '</div></div>';
+  h += '<div class="field"><label>行列</label><div class="seg light lg"><button type="button" class="' + (d.layout === 'auto' ? 'on' : '') + '" data-act="cs-layout" data-v="auto">按人数自动排</button><button type="button" class="' + (d.layout === 'manual' ? 'on' : '') + '" data-act="cs-layout" data-v="manual">自己设定</button></div>';
+  if (d.layout === 'manual') {
+    h += '<div class="cs-steps">' + stepper('rows', '排数', d.rows, '排', ROW_RANGE) + stepper('cols', '每排', d.cols, '张桌子', cr) + '</div>';
+  }
+  h += '</div>';
+  h += '<div class="field"><label>讲台两边</label><div class="cs-steps" style="margin-top:0">' + stepper('podL', '左边', d.podL, '张', [0, POD_MAX]) + stepper('podR', '右边', d.podR, '张', [0, POD_MAX]) + '</div>' +
+    '<div class="hint">默认不放。加好后在「排座」模式里把同学拖过去；重新排座、随机打乱时，坐在这里的同学不动</div></div>';
+  h += '<div class="field"><label>学生坐哪儿</label><div class="chips lg">' + CS_HOW.map(function (x) {
+    return '<button type="button" class="' + (d.how === x.id ? 'on' : '') + '" data-act="cs-how" data-v="' + x.id + '">' + x.t + '</button>';
+  }).join('') + '</div><div class="hint">' + hint + '</div></div>';
+  h += '</div><div class="cs-prev">' + seatPreviewHTML(d, res, 292, 230) +
+    '<div class="cs-cap">' + d.rows + ' 排 × ' + per + ' 个座位' + (pods ? ' + 讲台边 ' + pods + ' 个' : '') + ' = ' + cap + ' 个座位 · 学生 ' + n + ' 人</div>' +
+    (cap < n ? '<div class="cs-warn">座位比学生少 ' + (n - cap) + ' 个，坐不下的同学会显示为「未排座」</div>' :
+      noSeat ? '<div class="cs-cap">' + noSeat + ' 人未排座，可以在「排座」模式里拖到空位</div>' : '') +
+    '</div></div>';
+  h += '<div class="hr"></div><div class="cs-count"><div><div class="flabel">学生人数</div><div class="cs-n"><b class="num">' + n + '</b> 人<span class="muted">' +
+    (d.layout === 'auto' ? '人数跟着名单走，加减学生座位会自动调整' : '人数跟着名单走；座位不够时，多出来的同学显示为「未排座」') + '</span></div></div>' +
+    '<div class="cs-acts"><button class="btn btn-light" data-act="cs-go" data-to="add">' + ICON.userplus + '添加学生</button><button class="btn btn-light" data-act="cs-go" data-to="import">' + ICON.up + '批量导入</button><button class="btn btn-ghost" data-act="cs-go" data-to="list">管理名单</button></div></div>';
+  return h;
+}
+function stepper(k, label, v, unit, range) {
+  return '<div class="stepper"><span class="muted">' + label + '</span><button type="button" data-act="cs-step" data-k="' + k + '" data-d="-1"' + (v <= range[0] ? ' disabled' : '') + ' aria-label="减少">−</button>' +
+    '<b class="num">' + v + '</b><button type="button" data-act="cs-step" data-k="' + k + '" data-d="1"' + (v >= range[1] ? ' disabled' : '') + ' aria-label="增加">+</button><span class="muted">' + unit + '</span></div>';
+}
+function csRender() { var el = $('#csLayout'); if (el) el.innerHTML = csLayoutHTML(); }
+
+UI.act['class-set'] = function () {
+  var st = S.settings;
+  CS = { d: { rows: st.rows, cols: st.cols, desk: st.desk, podL: st.podL, podR: st.podR, layout: st.layout, pref: st.cols, how: S.students.some(function (s) { return s.seat; }) ? 'keep' : st.seatOrder } };
+  UI.hideCard(); UI.closePop();
+  UI.modal({
+    title: '班级设置 · ' + esc(st.className), wide: true, noFocus: true,
+    body: '<div class="row2"><div class="field"><label>班级名称<span class="req">*</span></label><input class="inp" id="csName" value="' + esc(st.className) + '" maxlength="30" placeholder="如：初二（3）班"></div>' +
+      '<div class="field"><label>教室</label><input class="inp" id="csRoom" value="' + esc(st.room || '') + '" maxlength="30" placeholder="如：博学楼 301"></div></div>' +
+      '<div class="cs-h">桌椅排列</div><div id="csLayout">' + csLayoutHTML() + '</div>',
+    foot: '<button class="btn btn-light" data-act="modal-close">取消</button><button class="btn btn-dark" data-act="cs-save">保存</button>'
+  });
+};
+UI.act['cs-desk'] = function (el) {
+  var d = CS.d, n = +el.getAttribute('data-n'); if (n === d.desk) return;
+  if (d.layout === 'manual') { var cr = colRange(n); d.cols = clamp(Math.round(d.cols * d.desk / n), cr[0], cr[1]); }
+  d.desk = n; d.pref = null; csRender();
+};
+UI.act['cs-layout'] = function (el) {
+  var d = CS.d, v = el.getAttribute('data-v'); if (v === d.layout) return;
+  csGrid(); d.layout = v; d.pref = d.cols; csRender();
+};
+UI.act['cs-step'] = function (el) {
+  var d = CS.d, k = el.getAttribute('data-k'), r = k === 'rows' ? ROW_RANGE : k === 'cols' ? colRange(d.desk) : [0, POD_MAX];
+  d[k] = clamp(d[k] + +el.getAttribute('data-d'), r[0], r[1]); csRender();
+};
+UI.act['cs-how'] = function (el) { CS.d.how = el.getAttribute('data-v'); csRender(); };
+
+function csCommit() {
+  var nm = $('#csName'), name = nm.value.trim();
+  if (!name) { nm.focus(); UI.toast('请填写班级名称'); return null; }
+  var st = S.settings, d = csGrid();
+  st.className = name; st.room = $('#csRoom').value.trim();
+  var changed = d.rows !== st.rows || d.cols !== st.cols || d.desk !== st.desk || d.podL !== st.podL || d.podR !== st.podR;
+  var res = arrangeSeats(S.students, d, d.how, st.seatOrder, true);
+  if (S.students.some(function (s) { return (res[s.id] || null) !== (s.seat || null); })) changed = true;
+  if (changed || d.how !== 'keep') applyLayout(d, d.how, true);
+  st.layout = d.layout;
+  save(true);
+  UI.refreshSide();
+  return { moved: changed || d.how !== 'keep' };
+}
+function csAfter() {
+  if (UI.page === 'settings') renderSetBody(); else UI.rerender();
+}
+UI.act['cs-save'] = function () {
+  var r = csCommit(); if (!r) return;
+  UI.closeModal(); csAfter();
+  UI.toast(r.moved ? '已保存，座位已按新桌椅排好' : '已保存');
+};
+UI.act['cs-go'] = function (el) {
+  if (!csCommit()) return;
+  var to = el.getAttribute('data-to');
+  UI.closeModal();
+  if (to === 'list') { UI.go('students'); return; }
+  csAfter();
+  if (to === 'add') openStudentForm(null, {}); else UI.act['stu-import']();
 };
 
 /* =========================================================
@@ -4251,6 +4621,7 @@ function exportWord(title, md) {
    设置 · 班级信息、教师形象、教室布局、学科与点评、AI 接口、数据备份、关于
    ========================================================= */
 var SetP = { sec: 'class' };
+var DEV_MAIL = 'cyberdaddyleo@outlook.com';
 var SET_SECS = [['class', '班级信息'], ['teacher', '教师形象'], ['room', '教室与黑板'], ['subjects', '学科与点评'], ['ai', 'AI 接口'], ['data', '数据与备份'], ['about', '关于']];
 
 UI.register('settings', {
@@ -4281,19 +4652,23 @@ function renderSetBody() {
       '<div class="row2"><div class="field"><label>班级名称</label>' + sInp('className', st.className, '如：初二（3）班') + '</div><div class="field"><label>学校</label>' + sInp('school', st.school, '选填') + '</div></div>' +
       '<div class="row3"><div class="field"><label>学段</label><select class="sel" data-chg="set-stage">' + ['小学', '初中', '高中'].map(function (x) { return '<option' + (st.stage === x ? ' selected' : '') + '>' + x + '</option>'; }).join('') + '</select></div>' +
       '<div class="field"><label>年级</label>' + sInp('grade', st.grade, '如：初二') + '</div><div class="field"><label>学期</label>' + sInp('term', st.term, '如：2026—2027 学年 第一学期') + '</div></div>' +
-      '<div class="row2"><div class="field"><label>开学日期</label>' + sInp('termStart', st.termStart, '', 'date') + '<div class="hint">用来计算「第几周」</div></div></div></div>';
+      '<div class="row2"><div class="field"><label>教室</label>' + sInp('room', st.room, '如：博学楼 301') + '</div><div class="field"><label>开学日期</label>' + sInp('termStart', st.termStart, '', 'date') + '<div class="hint">用来计算「第几周」</div></div></div></div>';
   } else if (SetP.sec === 'teacher') {
     var t = st.teacher;
     h += '<div class="panel set-sec"><div class="panel-title" style="margin-bottom:14px">教师形象</div><div class="gender-pick">' +
       ['F', 'M'].map(function (g) { return '<button class="' + (t.gender === g ? 'on' : '') + '" data-act="set-gender" data-g="' + g + '">' + ART.teacherAvatar({ gender: g }, 88) + (g === 'F' ? '女老师' : '男老师') + '</button>'; }).join('') + '</div>' +
       '<div class="row2" style="margin-top:18px"><div class="field"><label>称呼</label>' + sInp('teacher.name', t.name, '如：李老师') + '</div><div class="field"><label>任教学科</label>' + sInp('teacher.subject', t.subject, '如：数学') + '</div></div></div>';
   } else if (SetP.sec === 'room') {
-    var cols = st.pairs * 2, cap = st.rows * cols, unseat = S.students.filter(function (s) { return !s.seat; }).length;
-    h += '<div class="panel set-sec"><div class="panel-title">教室布局</div><div class="panel-sub">双人同桌排列；改小后放不下的同学会变成「未排座」</div>' +
-      '<div style="display:flex;gap:28px;align-items:flex-start;flex-wrap:wrap"><div style="min-width:260px"><div class="field"><label>排数（前后）</label><div class="chips">' + [4, 5, 6, 7, 8, 9].map(function (n) { return '<button class="' + (st.rows === n ? 'on' : '') + '" data-act="set-rows" data-n="' + n + '">' + n + ' 排</button>'; }).join('') + '</div></div>' +
-      '<div class="field"><label>组数（每组一列同桌）</label><div class="chips">' + [2, 3, 4, 5].map(function (n) { return '<button class="' + (st.pairs === n ? 'on' : '') + '" data-act="set-pairs" data-n="' + n + '">' + n + ' 组</button>'; }).join('') + '</div></div>' +
-      '<div class="muted" style="font-size:12.5px">共 ' + cap + ' 个座位，班里 ' + S.students.length + ' 人' + (unseat ? '，' + unseat + ' 人未排座' : '') + '</div></div>' +
-      '<div><div class="muted" style="font-size:12px;margin-bottom:6px;text-align:center">讲台</div><div class="mini-class" style="grid-template-columns:repeat(' + (cols + st.pairs - 1) + ',14px)">' + (function () { var s = ''; for (var r = 0; r < st.rows; r++) for (var c = 0; c < cols + st.pairs - 1; c++) s += (c % 3 === 2) ? '<span></span>' : '<i></i>'; return s; })() + '</div></div></div>' +
+    var per = seatCols(), cap = st.rows * per, unseat = S.students.filter(function (s) { return !s.seat; }).length;
+    var cur = {}; S.students.forEach(function (s) { cur[s.id] = s.seat; });
+    var dt = DESK_TYPES.filter(function (x) { return x.n === st.desk; })[0];
+    h += '<div class="panel set-sec"><div class="panel-title">教室布局</div><div class="panel-sub">桌椅排列也可以在教室页右上角的齿轮按钮里改</div>' +
+      '<div class="room-wrap"><div class="room-sum"><div class="info-grid"><div class="k">每张桌子</div><div>' + dt.t + '</div>' +
+      '<div class="k">行列</div><div>' + (st.layout === 'auto' ? '按人数自动排' : '自己设定') + ' · ' + st.rows + ' 排，每排 ' + st.cols + ' 张桌子</div>' +
+      '<div class="k">讲台两边</div><div>' + (st.podL + st.podR ? '左边 ' + st.podL + ' 张，右边 ' + st.podR + ' 张' : '不放桌子') + '</div>' +
+      '<div class="k">座位</div><div>共 ' + (cap + st.podL + st.podR) + ' 个，班里 ' + S.students.length + ' 人' + (unseat ? '，<span class="dn">' + unseat + ' 人未排座</span>' : '') + '</div></div>' +
+      '<button class="btn btn-dark" data-act="class-set" style="margin-top:16px">调整桌椅排列</button></div>' +
+      '<div class="cs-prev sm">' + seatPreviewHTML(st, cur, 250, 170) + '</div></div>' +
       '<div class="hr"></div><label class="chk"><input type="checkbox" data-chg="set-anim"' + (st.anim ? ' checked' : '') + '> 教室小动画（同学偶尔回头、举手、打瞌睡）</label></div>';
     h += '<div class="panel set-sec"><div class="panel-title">黑板与智慧屏</div><div class="panel-sub">显示在教室前方，每行一条</div>' +
       '<div class="row2"><div class="field"><label>左侧黑板 · 今日课程</label><textarea class="ta" data-inp="set" data-path="boardLeft" style="min-height:110px">' + esc(st.boardLeft) + '</textarea></div>' +
@@ -4330,19 +4705,14 @@ function renderSetBody() {
     h += '<div class="panel set-sec"><div style="display:flex;gap:14px;align-items:center">' + brandMark().replace('class="brand-mark"', 'class="brand-mark" style="width:52px;height:52px"') + '<div><div style="font-size:18px;font-weight:700">班主任工作台</div><div class="muted" style="font-size:13px">个人工作台系列 · 第 1 期 · v' + VERSION + '</div></div></div>' +
       '<div style="font-size:13.5px;line-height:1.9;color:var(--ink2);margin-top:14px">一个打开就能用的单文件工作台：学生档案、考勤、课堂点评、排座位、成绩录入与分析，外加可接入任意大模型的 AI 助手。所有数据都留在你自己的电脑上。<br>开源版只做 PC 端；手机端和更多职业版本会陆续推出。</div>' +
       '<div style="font-size:13px;line-height:1.8;color:var(--ink2);margin-top:12px;padding:12px 14px;background:var(--fill);border-radius:12px"><b style="color:var(--ink)">开源协议</b><br>个人可以免费使用、修改和二次开发，分享时请保留作者署名和协议；禁止任何形式的商业使用。完整条款见随软件附带的 LICENSE 文件。</div>' +
+      '<div class="dev-info"><b>开发者</b><div class="info-grid"><div class="k">全网渠道</div><div>@赛博老爸</div>' +
+      '<div class="k">商用及合作开发</div><div class="dev-mail"><a href="mailto:' + DEV_MAIL + '">' + DEV_MAIL + '</a><button class="btn btn-xs btn-light" data-act="copy-txt" data-t="' + DEV_MAIL + '">复制</button></div></div></div>' +
       '<div class="sign" style="padding:14px 0 0;font-size:11px">Developed by @赛博老爸</div></div>';
   }
   el.innerHTML = h;
 }
 UI.chg['set-stage'] = function (el) { S.settings.stage = el.value; save(); };
 UI.act['set-gender'] = function (el) { S.settings.teacher.gender = el.getAttribute('data-g'); save(); UI.refreshSide(); renderSetBody(); };
-UI.act['set-rows'] = function (el) { S.settings.rows = +el.getAttribute('data-n'); fixSeats(); save(); renderSetBody(); };
-UI.act['set-pairs'] = function (el) { S.settings.pairs = +el.getAttribute('data-n'); fixSeats(); save(); renderSetBody(); };
-function fixSeats() {
-  var cols = S.settings.pairs * 2;
-  S.students.forEach(function (s) { if (!s.seat) return; var p = s.seat.split('-'); if (+p[0] >= S.settings.rows || +p[1] >= cols) s.seat = null; });
-  autoGroups(); Cls.view.fit = true;
-}
 UI.chg['set-anim'] = function (el) { S.settings.anim = el.checked; save(); };
 UI.inp['set-sub-full'] = function (el) { var v = parseFloat(el.value); if (v > 0) { S.settings.subjects[+el.getAttribute('data-i')].full = v; save(); } };
 UI.act['set-sub-del'] = function (el) { S.settings.subjects.splice(+el.getAttribute('data-i'), 1); save(); renderSetBody(); };
