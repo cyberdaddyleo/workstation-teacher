@@ -483,6 +483,7 @@ svg.ava { border-radius: 50%; overflow: hidden; }
 @keyframes blink { 50% { opacity: 0; } }
 .msg-tools { display: flex; gap: 4px; margin-top: 6px; }
 .msg-err { background: var(--red-soft); color: #a8322a; border-radius: 12px; padding: 10px 14px; font-size: 13px; line-height: 1.6; }
+.msg-warn { background: #fdf6e6; color: #8a5a00; border-radius: 12px; padding: 10px 14px; font-size: 13px; line-height: 1.6; }
 .ai-foot { padding: 10px 34px 18px; }
 .ai-foot .composer textarea { min-height: 44px; }
 .ai-note { text-align: center; font-size: 11.5px; color: var(--ink3); margin-top: 8px; }
@@ -1109,11 +1110,14 @@ small.dupno { display: inline-block; margin-left: 4px; padding: 0 5px; height: 1
 .qm-tbl { border-collapse: separate; border-spacing: 0; font-size: 12.5px; }
 .qm-tbl th, .qm-tbl td { border-bottom: 1px solid #f0f0ee; padding: 0; height: 34px; white-space: nowrap; background: #fff; }
 .qm-tbl thead th { position: sticky; top: 0; z-index: 2; font-weight: 500; color: var(--ink3); font-size: 12px; padding: 0 8px; }
-.qm-tbl thead tr:nth-child(2) th { top: 34px; }
+.qm-tbl thead tr:nth-child(2) th { top: 34px; height: 50px; }
 .qm-tbl th.sec { text-align: center; border-left: 1px solid var(--line); color: var(--ink2); }
 .qm-tbl th.qh { text-align: center; min-width: 46px; padding: 0 2px; cursor: help; line-height: 1.15; }
 .qm-tbl th.qh b { display: block; color: var(--ink); font-family: var(--num); }
-.qm-tbl th.qh small { font-size: 10.5px; color: #1d9a57; }
+.qm-tbl th.qh small { display: block; font-size: 10.5px; line-height: 1.3; }
+.qm-tbl th.qh small.qa { color: #1d9a57; font-weight: 600; font-family: var(--num); }
+.qm-tbl th.qh small.qa.none { color: #b0b0ab; font-weight: 400; font-family: inherit; }
+.qm-tbl th.qh small.qs { color: var(--ink3); }
 .qm-tbl .sk { position: sticky; left: 0; z-index: 1; padding: 0 8px; min-width: 64px; }
 .qm-tbl .sk2 { position: sticky; left: 64px; z-index: 1; padding: 0 8px; min-width: 110px; border-right: 1px solid var(--line); }
 .qm-tbl thead .sk, .qm-tbl thead .sk2 { z-index: 3; }
@@ -1275,6 +1279,15 @@ small.dupno { display: inline-block; margin-left: 4px; padding: 0 5px; height: 1
 .qbv-ans { font-size: 12px; color: #167a45; margin-top: 4px; }
 .qmr-ana { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; white-space: normal; font-weight: 400; font-size: 12px; color: var(--ink2); line-height: 1.5; }
 .qmr-key:has(.qmr-ana) { white-space: normal; }
+/* 题目管理里的 AI 功能：没配置 API 时的提示 */
+.ai-gate { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 14px; background: #fff8e6; box-shadow: inset 0 0 0 1.5px rgba(232, 154, 12, .28); }
+.ai-gate > svg { width: 20px; height: 20px; color: #c98400; flex: none; }
+.ai-gate b { display: block; font-size: 13.5px; }
+.ai-gate span { display: block; font-size: 12px; color: var(--ink2); line-height: 1.6; margin-top: 2px; }
+.ai-gate .btn { flex: none; }
+.qm-opt.off { opacity: .6; }
+.ai-gate .ai-more { color: var(--ink2); }
+.ai-gate .ai-more svg { width: 12px; height: 12px; margin-left: 2px; transform: rotate(90deg); }
 
 </style>
 </head>
@@ -3709,17 +3722,148 @@ function shrinkImage(file, maxSide, quality) {
   });
 }
 
-/* ---------- AI 返回的 JSON：去掉代码块、修掉中文引号和多余逗号 ---------- */
-function parseAIJSON(t) {
-  t = String(t || '');
-  var m = t.match(/\x60{3}(?:json|JSON)?\s*([\s\S]*?)\x60{3}/); if (m) t = m[1];
-  var i1 = t.search(/[\[{]/); if (i1 < 0) return null;
-  var close = t.charAt(i1) === '[' ? ']' : '}', j = t.lastIndexOf(close); if (j < i1) return null;
-  var body = t.slice(i1, j + 1);
-  try { return JSON.parse(body); } catch (e) {
-    body = body.replace(/[“”]/g, '"').replace(/,\s*([\]}])/g, '$1').replace(/\n/g, '\\n').replace(/\\n\s*([\]}"])/g, '$1').replace(/([\[{,])\\n\s*/g, '$1');
-    try { return JSON.parse(body); } catch (e2) { return null; }
+/* ---------- AI 返回的 JSON ----------
+   AI 常见的「不标准」：包在代码块里、前面有思考过程、数学式写成 LaTeX（\frac、\sqrt 让 JSON 直接报错）、
+   中文引号、多余逗号、字符串里有没转义的引号或换行、输出到一半被截断。这里都尽量兼容，截断的只保留完整的部分 */
+function looseJSON(s, start) {
+  var i = start || 0, n = s.length, cut = false;
+  function ws() {
+    for (;;) {
+      while (i < n && /[\s　﻿]/.test(s[i])) i++;
+      if (s[i] === '/' && s[i + 1] === '/') { while (i < n && s[i] !== '\n') i++; continue; }
+      if (s[i] === '/' && s[i + 1] === '*') { var e = s.indexOf('*/', i + 2); i = e < 0 ? n : e + 2; continue; }
+      break;
+    }
   }
+  function str(q) {
+    var close = q === '“' ? '”' : q === '「' ? '」' : q; i++; var out = '';
+    while (i < n) {
+      var c = s[i];
+      if (c === '\\') {
+        var d = s[i + 1];
+        if (d === undefined) { i++; break; }
+        if (d === 'u' && /^[0-9a-fA-F]{4}$/.test(s.substr(i + 2, 4))) { out += String.fromCharCode(parseInt(s.substr(i + 2, 4), 16)); i += 6; continue; }
+        if (/[bfnrt]/.test(d) && /[a-zA-Z]/.test(s[i + 2] || '')) { out += '\\' + d; i += 2; continue; }   // \frac \times \neq：是 LaTeX，不是转义
+        var map = { '"': '"', '\\': '\\', '/': '/', b: '', f: '', n: '\n', r: '', t: ' ', "'": "'" };
+        if (map[d] !== undefined) { out += map[d]; i += 2; continue; }
+        out += '\\' + d; i += 2; continue;
+      }
+      if (c === close || (close !== '"' && c === '"') || (close === '"' && (c === '”'))) {
+        var k = i + 1; while (k < n && /[ \t\r\n]/.test(s[k])) k++;
+        if (k >= n || /[,}\]:：]/.test(s[k])) { i++; return out; }
+        out += c; i++; continue;   // 字符串里没转义的引号，当成内容
+      }
+      out += c; i++;
+    }
+    cut = true; return out;
+  }
+  function val() {
+    ws(); if (i >= n) { cut = true; return undefined; }
+    var c = s[i];
+    if (c === '{') return obj();
+    if (c === '[') return arr();
+    if (c === '"' || c === "'" || c === '“' || c === '「') return str(c);
+    var m = /^-?\d+(\.\d+)?([eE][+-]?\d+)?(?=\s*[,}\]\n]|\s*$)/.exec(s.slice(i, i + 40));
+    if (m) { i += m[0].length; return parseFloat(m[0]); }
+    var w = /^(true|false|null)\b/.exec(s.slice(i, i + 6)); if (w) { i += w[0].length; return w[0] === 'true' ? true : w[0] === 'false' ? false : null; }
+    var st = i; while (i < n && !/[,}\]\n]/.test(s[i])) i++;
+    return s.slice(st, i).trim();
+  }
+  function obj() {
+    i++; var o = {};
+    for (var g = 0; g < 100000; g++) {
+      ws(); if (i >= n) { cut = true; return o; }
+      var c = s[i]; if (c === '}') { i++; return o; } if (c === ',' || c === '，') { i++; continue; }
+      var k; if (/["'“「]/.test(c)) k = str(c); else { var st = i; while (i < n && !/[:：\s,}]/.test(s[i])) i++; k = s.slice(st, i); if (i === st) { i++; continue; } }
+      if (cut) return o;
+      ws(); if (s[i] === ':' || s[i] === '：') i++;
+      var v = val(); if (cut) { if (v !== undefined && typeof v !== 'object') o[k] = v; return o; }
+      o[k] = v;
+    }
+    return o;
+  }
+  function arr() {
+    i++; var a = [];
+    for (var g = 0; g < 100000; g++) {
+      ws(); if (i >= n) { cut = true; return a; }
+      var c = s[i]; if (c === ']') { i++; return a; } if (c === ',' || c === '，') { i++; continue; }
+      var v = val(); if (cut) return a;   // 被截断的最后一个元素不要
+      a.push(v);
+    }
+    return a;
+  }
+  var r = val(); return r;
+}
+/* LaTeX → 普通文字：\frac{a}{b} → a/b、\sqrt{x} → √x、x^{2} → x²、\times → × */
+var TEX_SYM = { times: '×', div: '÷', cdot: '·', pm: '±', mp: '∓', le: '≤', leq: '≤', leqslant: '≤', ge: '≥', geq: '≥', geqslant: '≥', ne: '≠', neq: '≠', approx: '≈', equiv: '≡', pi: 'π', alpha: 'α', beta: 'β', gamma: 'γ', delta: 'δ', Delta: 'Δ', theta: 'θ', lambda: 'λ', mu: 'μ', sigma: 'σ', omega: 'ω', varphi: 'φ', phi: 'φ', rho: 'ρ', angle: '∠', triangle: '△', perp: '⊥', parallel: '∥', infty: '∞', degree: '°', circ: '°', cdots: '⋯', ldots: '…', dots: '…', because: '∵', therefore: '∴', in: '∈', notin: '∉', cup: '∪', cap: '∩', subset: '⊂', subseteq: '⊆', emptyset: '∅', varnothing: '∅', rightarrow: '→', to: '→', leftarrow: '←', Rightarrow: '⇒', Leftrightarrow: '⇔', sim: '∼', cong: '≅', odot: '⊙', square: '□', quad: ' ', qquad: '  ', ',': '', ';': ' ', '!': '', ' ': ' ', '%': '%', '{': '{', '}': '}', '\\': '\n', backslash: '\\', prime: '′', angle: '∠', sum: '∑', int: '∫', log: 'log', lg: 'lg', ln: 'ln', sin: 'sin', cos: 'cos', tan: 'tan', max: 'max', min: 'min', lim: 'lim', overline: '', underline: '', boxed: '' };
+function deLatex(t) {
+  t = String(t == null ? '' : t);
+  if (!/\\[a-zA-Z(\[{,;! ]|\$|\^\{|_\{|\^[0-9a-z]|[A-Za-z]_[0-9a-z]/.test(t)) return t;
+  t = t.replace(/\$\$?([^$]*)\$\$?/g, '$1').replace(/\\[()\[\]]/g, '');
+  function grp(str, k) {   // 从 str[k] 的 { 开始，取出配对的 {...}
+    if (str[k] !== '{') { var m = /^\s*(\\[a-zA-Z]+|.)/.exec(str.slice(k)); return m ? [m[1], k + m[0].length] : ['', k]; }
+    var d = 0; for (var j = k; j < str.length; j++) { if (str[j] === '{') d++; else if (str[j] === '}' && --d === 0) return [str.slice(k + 1, j), j + 1]; }
+    return [str.slice(k + 1), str.length];
+  }
+  for (var g = 0; g < 50; g++) {
+    var m = /\\(d|t)?frac\s*/.exec(t); if (!m) break;
+    var a = grp(t, m.index + m[0].length), b = grp(t, a[1]);
+    var fa = deLatex(a[0]), fb = deLatex(b[0]), mix = /\d$/.test(t.slice(0, m.index)) && /^\d+$/.test(fa) && /^\d+$/.test(fb);   // 带分数：6\frac{1}{2} → 6又1/2
+    t = t.slice(0, m.index) + (mix ? '又' : '') + mFrac(fa, fb) + t.slice(b[1]);
+  }
+  for (g = 0; g < 50; g++) {
+    m = /\\sqrt\s*(\[([^\]]*)\])?\s*/.exec(t); if (!m) break;
+    var r = grp(t, m.index + m[0].length);
+    t = t.slice(0, m.index) + mRoot(deLatex(r[0]), m[2] || '') + t.slice(r[1]);
+  }
+  t = t.replace(/\\(?:text|mathrm|mathbf|textbf|mathit|operatorname|vec|overrightarrow)\s*\{([^{}]*)\}/g, function (a, x) { return /vec|overrightarrow/.test(a) ? x + '⃗' : x; });
+  t = t.replace(/\\left|\\right|\\big|\\Big|\\displaystyle/g, '');
+  t = t.replace(/\^\s*\\circ/g, '°');
+  t = t.replace(/\\([a-zA-Z]+|[,;! %{}\\])/g, function (a, w) { return TEX_SYM[w] !== undefined ? TEX_SYM[w] : w; });
+  t = t.replace(/\^\s*\{([^{}]*)\}/g, function (a, x) { return toSup(x); }).replace(/([A-Za-z0-9)\]′])\^(-?[A-Za-z0-9])/g, function (a, b, x) { return b + toSup(x); });
+  t = t.replace(/_\s*\{([^{}]*)\}/g, function (a, x) { return toSub(x); }).replace(/([A-Za-z)])_([0-9a-z])(?![_0-9a-z])/g, function (a, b, x) { return b + toSub(x); });
+  return t.replace(/\{([^{}]*)\}/g, '$1');
+}
+function deLatexDeep(v) {
+  if (typeof v === 'string') return deLatex(v);
+  if (Array.isArray(v)) return v.map(deLatexDeep);
+  if (v && typeof v === 'object') { var o = {}; Object.keys(v).forEach(function (k) { o[k] = deLatexDeep(v[k]); }); return o; }
+  return v;
+}
+/* 先把 LaTeX 的反斜杠补成合法的 JSON 转义：\frac → \\frac（不然 \f 会被当成换页符），\sqrt → \\sqrt */
+function fixEsc(b) {
+  var o = '';
+  for (var i = 0; i < b.length; i++) {
+    var c = b[i];
+    if (c !== '\\') { o += c; continue; }
+    var d = b[i + 1];
+    if (d === '\\') { o += '\\\\'; i++; continue; }
+    if (d === 'u' && /^[0-9a-fA-F]{4}$/.test(b.substr(i + 2, 4))) { o += '\\u'; i++; continue; }
+    if (d === '"' || d === '/' || (/[bfnrt]/.test(d || '') && !/[a-zA-Z]/.test(b[i + 2] || ''))) { o += '\\' + d; i++; continue; }
+    o += '\\\\';
+  }
+  return o;
+}
+function parseAIJSON(t) {
+  t = String(t || '').replace(/<think>[\s\S]*?<\/think>/g, '');
+  if (t.indexOf('</think>') >= 0) t = t.slice(t.lastIndexOf('</think>') + 8);
+  var m = t.match(/\x60{3}(?:json|JSON)?\s*([\s\S]*?)(\x60{3}|$)/); if (m && /[\[{]/.test(m[1])) t = m[1];
+  var i1 = t.search(/[\[{]/); if (i1 < 0) return null;
+  var close = t.charAt(i1) === '[' ? ']' : '}', j = t.lastIndexOf(close), r;
+  if (j > i1) { try { r = JSON.parse(fixEsc(t.slice(i1, j + 1))); } catch (e) { r = undefined; } }
+  if (r === undefined) { try { r = looseJSON(t, i1); } catch (e2) { r = null; } }
+  if (r === undefined || r === null || typeof r !== 'object') return null;
+  return deLatexDeep(r);
+}
+/* AI 有时把数组包在对象里：{"questions": [...]}、{"data": {...}} —— 找出里面第一个对象数组 */
+function aiList(j, keys) {
+  if (Array.isArray(j)) return j;
+  if (!j || typeof j !== 'object') return [];
+  var ks = (keys || []).concat(['questions', 'items', 'list', 'data', 'result', 'results', '题目', '试题']);
+  for (var i = 0; i < ks.length; i++) if (Array.isArray(j[ks[i]])) return j[ks[i]];
+  var all = Object.keys(j).map(function (k) { return j[k]; });
+  for (i = 0; i < all.length; i++) if (Array.isArray(all[i]) && all[i].some(function (x) { return x && typeof x === 'object'; })) return all[i];
+  return [j];
 }
 function aiToQ(o, base) {
   if (!o || typeof o !== 'object') return null;
@@ -3838,7 +3982,7 @@ function parseKeyText(text) {
       if (ks.length >= 2 || rng) { ks.forEach(function (k) { put(+k, { ans: map[k].replace(/[（(]\s*\d+(\.\d+)?\s*分\s*[)）]\s*$/, '').trim(), type: secType, score: secScore }); }); cur = null; return; }
     }
     var qm = ln.match(/^(\d{1,3})\s*[.．、]\s*(.*)$/);
-    if (qm && !/^\d+\s*[.．]\d/.test(ln)) {
+    if (qm && !/^\d+\.\d/.test(ln)) {   // 答案里「13．108」是第 13 题答案 108；半角的「1.5」才当小数
       var n = +qm[1], rest = qm[2], sc = 0;
       var scm = rest.match(/^[（(]\s*(?:本(?:小)?题)?(?:满分)?(?:共)?\s*(\d+(?:\.\d+)?)\s*分\s*[)）]\s*/);
       if (scm) { sc = +scm[1]; rest = rest.slice(scm[0].length); }
@@ -3846,7 +3990,11 @@ function parseKeyText(text) {
       var tp = secType || (objT(guessType({ opts: [], ans: rest, stem: '' })) ? 'choice' : short ? 'blank' : 'answer');
       if (objT(tp) && !/^[A-H]+$|^[对错√×]$/i.test(rest.replace(/\s/g, ''))) { if (secType) tp = secType; }
       var it = put(n, { type: tp, score: sc || secScore });
-      if (it) { if (short && !objT(tp) || objT(tp)) it.ans = rest.replace(/[…．.·]{2,}\s*\d+(\.\d+)?\s*分\s*$/, '').trim(); else { it.ana = rest; it.ans = ''; } it.exp = !!sc; }
+      if (it && (short && !objT(tp) || objT(tp))) {   // 答案后面跟着的分值：「13．108（4 分）」「14．x=2 ……3 分」，分值单独记，不混进答案
+        var tm = rest.match(/\s*(?:[（(]\s*(\d+(?:\.\d+)?)\s*分\s*[)）]|[…．.·]{2,}\s*(\d+(?:\.\d+)?)\s*分)\s*$/);
+        if (tm) { rest = rest.slice(0, tm.index); if (!sc) { sc = +(tm[1] || tm[2]); it.score = sc; } }
+      }
+      if (it) { if (short && !objT(tp) || objT(tp)) it.ans = rest.trim(); else { it.ana = rest; it.ans = ''; } it.exp = !!sc; }
       cur = it && !objT(tp) && !short ? it : (it && !objT(tp) ? it : null);
       if (cur) { var mk0 = rest.match(/(?:[…．.·]{2,}\s*|[（(]\s*)(\d+(?:\.\d+)?)\s*分\s*[)）]?\s*$/); if (mk0) cur.marks.push(+mk0[1]); }
       return;
@@ -9291,19 +9439,22 @@ var AIC = {
   ready: function () { var a = S.settings.ai; return !!(a.base && a.model && (a.key || /localhost|127\.0\.0\.1/.test(a.base))); },
   isClaude: function () { var a = S.settings.ai; return a.provider === 'claude' || /anthropic\.com/.test(a.base); },
   label: function () { var a = S.settings.ai; return presetOf(a.provider).name.replace(/（.*）/, '') + ' · ' + (a.model || '未填模型'); },
-  stream: function (messages, onDelta, signal, maxTokens, model) {
+  /* temp：这次调用的温度（批改、识别用低温度更稳）；info：回填 finish（结束原因）、reasoning（思考过程字数） */
+  stream: function (messages, onDelta, signal, maxTokens, model, temp, info) {
+    info = info || {};
     var a = S.settings.ai, base = String(a.base || '').replace(/\/+$/, '');
     var req, url;
     if (AIC.isClaude()) {
       var sys = messages.filter(function (m) { return m.role === 'system'; }).map(function (m) { return m.content; }).join('\n\n');
       url = base + '/messages';
       req = { method: 'POST', signal: signal, headers: { 'content-type': 'application/json', 'x-api-key': a.key, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
-        body: JSON.stringify({ model: model || a.model, max_tokens: maxTokens || 4096, system: sys, stream: true, temperature: Math.min(1, tempOf(a)), messages: messages.filter(function (m) { return m.role !== 'system'; }) }) };
+        body: JSON.stringify({ model: model || a.model, max_tokens: maxTokens || 4096, system: sys, stream: true, temperature: Math.min(1, temp != null ? temp : tempOf(a)), messages: messages.filter(function (m) { return m.role !== 'system'; }) }) };
     } else {
       url = base + '/chat/completions';
       var hd = { 'Content-Type': 'application/json' }; if (a.key) hd.Authorization = 'Bearer ' + a.key;
-      var body = { model: model || a.model, messages: messages, stream: true, temperature: tempOf(a) };
+      var body = { model: model || a.model, messages: messages, stream: true, temperature: temp != null ? temp : tempOf(a) };
       if (maxTokens) body.max_tokens = maxTokens;
+      if (info.think === false) { var nt = AIC.noThink(); Object.keys(nt).forEach(function (k) { body[k] = nt[k]; info.thinkSent = true; }); }
       req = { method: 'POST', signal: signal, headers: hd, body: JSON.stringify(body) };
     }
     var full = '';
@@ -9313,7 +9464,10 @@ var AIC = {
       var ct = res.headers.get('content-type') || '';
       if (ct.indexOf('application/json') >= 0) {
         return res.json().then(function (j) {
-          var t = j.choices && j.choices[0] && j.choices[0].message ? j.choices[0].message.content : (j.content && j.content[0] ? j.content[0].text : '');
+          if (j.error) throw AIC.httpErr(400, JSON.stringify(j));
+          var c0 = j.choices && j.choices[0], t = c0 && c0.message ? c0.message.content : (j.content && j.content[0] ? j.content[0].text : '');
+          if (c0) { info.finish = c0.finish_reason; if (c0.message && c0.message.reasoning_content) info.reasoning = c0.message.reasoning_content.length; }
+          if (j.stop_reason === 'max_tokens') info.finish = 'length';
           push(t || ''); return full;
         });
       }
@@ -9330,7 +9484,14 @@ var AIC = {
               var j = JSON.parse(p);
               if (j.error) throw AIC.httpErr(400, JSON.stringify(j.error));
               if (j.type === 'content_block_delta' && j.delta) push(j.delta.text || '');
-              else if (j.choices && j.choices[0] && j.choices[0].delta) push(j.choices[0].delta.content || '');
+              else if (j.type === 'message_delta' && j.delta && j.delta.stop_reason === 'max_tokens') info.finish = 'length';
+              else if (j.choices && j.choices[0]) {
+                var c = j.choices[0], dl = c.delta || {};
+                if (dl.reasoning_content || dl.reasoning) info.reasoning = (info.reasoning || 0) + String(dl.reasoning_content || dl.reasoning).length;
+                var ct = dl.content; if (Array.isArray(ct)) ct = ct.map(function (x) { return x && x.text || ''; }).join('');
+                push(ct || '');
+                if (c.finish_reason) info.finish = c.finish_reason;
+              }
             } catch (e) { if (e && e.isAI) throw e; }
           });
           return pump();
@@ -9343,6 +9504,44 @@ var AIC = {
       var ne = new Error('连不上 AI 服务。常见原因：① 网络不通或地址填错；② 这家服务不允许网页直接调用（跨域限制）。可以换 DeepSeek、Kimi 等试试，或运行开源包里的 ai-proxy.js 做本地中转。');
       ne.isAI = true; throw ne;
     });
+  },
+  /* 出题、批改、识别这类要输出 JSON 的活，关掉「深度思考」：
+     DeepSeek、智谱等默认先想一大段，会把输出额度用光，结果被截断或者干脆是空的 */
+  noThink: function () {
+    var a = S.settings.ai, b = String(a.base || ''), pv = a.provider;
+    if (AIC.ntBad) return {};
+    if (/deepseek\.com|bigmodel\.cn|volces\.com|moonshot\./.test(b) || (pv === 'deepseek' || pv === 'glm' || pv === 'doubao' || pv === 'kimi') && !/localhost|127\.0\.0\.1:(?!8787)/.test(b)) return { thinking: { type: 'disabled' } };
+    if (/dashscope|aliyuncs\.com|siliconflow/.test(b) || pv === 'qwen' || pv === 'silicon') return { enable_thinking: false };
+    return {};
+  },
+  /* 带重试的调用：check 认不出结果、限流（429）、服务出错（5xx）、网络抖动都会自动再试；
+     max_tokens 超过模型上限被拒时自动调小，回复被截断时自动调大，不认「关闭思考」参数的服务自动去掉再试 */
+  ask: function (o) {
+    var tries = o.tries || 3, k = 0, max = o.max, extra = 0, info0 = {};
+    function stopped() { var ab = new Error('已停止生成'); ab.isAI = true; ab.abort = true; return ab; }
+    function once() {
+      k++;
+      var info = info0 = { think: o.think };
+      return AIC.stream(o.messages, o.onDelta || function () { }, o.signal, max, o.model, o.temp, info).then(function (txt) {
+        var v = o.check ? o.check(txt, info) : txt;
+        if (v) return { txt: txt, val: v, info: info };
+        var why = !String(txt || '').trim() ? (info.reasoning ? '模型只输出了思考过程，没给出结果' : 'AI 没有回复内容') : info.finish === 'length' ? 'AI 的回复太长，被截断了' : 'AI 的回复格式不对：' + String(txt).slice(0, 60);
+        var e = new Error(why); e.isAI = true; e.parse = true; e.txt = txt; e.cut = info.finish === 'length'; throw e;
+      }).catch(function (e) {
+        if (e && e.abort) throw e;
+        if (o.signal && o.signal.aborted) throw stopped();
+        var st = e && e.status, em = e && e.message || '';
+        if (st === 400 && max > 2048 && extra < 4 && /max_tokens|max_new_tokens|max_completion|maximum|too large|exceed|range|超过|超出|最大|范围/i.test(em)) { extra++; max = max > 4096 ? 4096 : 2048; return once(); }
+        if (st === 400 && info0.thinkSent && extra < 4 && /think|unrecogni|unknown|not support|unsupported|extra|invalid|参数/i.test(em)) { extra++; AIC.ntBad = true; return once(); }
+        if (e.cut && max && max < 16000 && k < tries) { max = Math.min(16000, max * 2); }
+        var retry = k < tries && (e.parse || st === 429 || st >= 500 || (!st && !e.abort));
+        if (!retry) throw e;
+        if (o.onRetry) o.onRetry(k, e);
+        var wait = st === 429 ? 3000 * k : 1000 * k;
+        return new Promise(function (r) { setTimeout(r, wait); }).then(function () { if (o.signal && o.signal.aborted) throw stopped(); return once(); });
+      });
+    }
+    return once();
   },
   httpErr: function (status, text) {
     var msg = '', detail = '';
@@ -10200,7 +10399,29 @@ UI.act['qe-save'] = function () {
   UI.closeModal(); if (cb) cb(out);
 };
 
-/* ---------- AI 出题 / 变式：有 API 直接生成，没有就复制提示词，再把回复粘回来 ---------- */
+/* ---------- 题目管理里的 AI 功能（出题、整理、识图、换数据、批改、讲评）：默认要先配置 API；
+   实在没条件配置的，在提示条的「其他方式」菜单里改用复制提示词（这次打开工作台期间有效） ---------- */
+var QAI = { prompt: false, cont: {} };
+function aiOK() { return AIC.ready() || QAI.prompt; }
+function aiGateHTML(what, vision, key) {
+  return '<div class="ai-gate">' + ICON.spark + '<div class="grow"><b>' + esc(what) + '要先配置 AI 接口</b><span>到「设置 → AI 接口」填好服务地址、模型和 API Key' + (vision ? '，识别图片还要一个能看图的「识图模型」' : '') + '，配好就能直接用。</span></div>' +
+    (key ? '<button class="btn btn-sm btn-ghost ai-more" data-act="ai-more" data-k="' + key + '">其他方式' + ICON.chevron + '</button>' : '') + '<button class="btn btn-sm btn-dark" data-act="go" data-page="settings" data-sec="ai">去配置</button></div>';
+}
+UI.act['ai-more'] = function (el) {
+  var r = el.getBoundingClientRect();
+  UI.pop('<div class="pop-title">没条件配置 API？</div><div class="menu"><button data-act="ai-prompt" data-k="' + el.getAttribute('data-k') + '">' + ICON.copy + '改用复制提示词</button></div><div class="muted" style="font-size:12px;line-height:1.65;padding:6px 8px 2px">工作台给你写好提示词，复制给豆包、Kimi 等 AI 的网页版或 App，再把回复粘贴回来。这次打开工作台期间，题目管理里的 AI 功能都按这个方式用。</div>', r.left + r.width / 2, r.bottom - 6);
+  var p = $('#pop'); if (p) p.style.zIndex = 95;
+};
+UI.act['ai-prompt'] = function (el) { var f = QAI.cont[el.getAttribute('data-k')]; UI.closePop(); QAI.prompt = true; if (f) f(); };
+/* 入口检查：配置了 API 或者已经选了提示词方式就放行；否则弹提示，选了「改用复制提示词」后接着做 cont */
+function needAI(what, vision, cont) {
+  if (aiOK()) return true;
+  QAI.cont.modal = function () { UI.closeModal(); if (cont) cont(); };
+  UI.modal({ title: '先配置 AI 接口', body: aiGateHTML(what, vision, cont ? 'modal' : ''), foot: '<button class="btn btn-light" data-act="modal-close">取消</button>' });
+  return false;
+}
+
+/* ---------- AI 出题 / 变式：用配置好的 API 生成；选了提示词方式的，复制提示词再把回复粘回来 ---------- */
 var QG = null;
 function qLevel() { var st = S.settings; return st.grade && st.grade.indexOf(st.stage.slice(0, 1)) === 0 ? st.grade : st.stage + (st.grade || ''); }
 function qSys() {
@@ -10208,31 +10429,43 @@ function qSys() {
   return '你是一名经验丰富的中国' + qLevel() + ownName() + '老师，擅长命题和编写变式题。要求：题目符合课程标准和学生水平；题干表述严谨，答案唯一且正确；计算题、应用题先自己验算一遍再给答案；不出偏题怪题；不涉及任何真实学生信息。';
 }
 function qGenModal(o) {
-  QG = { o: o, out: '', list: [], busy: false, err: '', ctrl: null, pick: {}, pasted: '', manual: !AIC.ready() };
+  if (!o.list && !needAI(o.title || 'AI 出题', false, function () { qGenModal(o); })) return;
+  QG = { o: o, out: '', list: [], busy: false, err: '', ctrl: null, pick: {}, pasted: '', manual: !o.list && !AIC.ready() };
   UI.modal({ title: o.title || 'AI 出题', wide: true, body: '<div id="qgBody"></div>', foot: '<div id="qgFoot" style="display:flex;gap:8px;width:100%;justify-content:flex-end"></div>', onClose: function () { if (QG && QG.ctrl) try { QG.ctrl.abort(); } catch (e) { } } });
   if (o.list) { QG.list = o.list; o.list.forEach(function (q, i) { QG.pick[i] = 1; }); renderQG(); return; }
-  if (!QG.manual) runQG(); else renderQG();
+  if (QG.manual) renderQG(); else runQG();
 }
 function qgListFoot() {
   var o = QG.o, f = '', n = Object.keys(QG.pick).filter(function (k) { return QG.pick[k]; }).length, acts = o.actions || [['bank', '存入题库']];
   f += '<span class="muted" style="margin-right:auto;align-self:center;font-size:12.5px">' + (o.list ? '' : 'AI 出的题请老师过目，答案不对可以存进来后再改') + '</span>';
-  if (!QG.manual && !o.list) f += '<button class="btn btn-light" data-act="qg-again">' + ICON.refresh + '重新生成</button>';
+  if (!o.list && !QG.manual) f += '<button class="btn btn-light" data-act="qg-again">' + ICON.refresh + '重新生成</button>';
   acts.forEach(function (a, k) { f += '<button class="btn ' + (k === acts.length - 1 ? 'btn-dark' : 'btn-light') + '" data-act="qg-do" data-a="' + a[0] + '"' + (n ? '' : ' disabled') + '>' + a[1] + (n ? '（' + n + ' 道）' : '') + '</button>'; });
   return f;
 }
 function qgPrompt() { return QG.o.prompt + '\n\n' + Q_JSON_SPEC; }
+/* AI 出题：关掉深度思考、留足输出长度；回复认不出（格式不对、被截断）自动再要一次，最多 3 次 */
+function qgList(txt) { return aiList(parseAIJSON(txt)).map(function (x) { return aiToQ(x, QG && QG.o.base); }).filter(Boolean); }
 function runQG() {
-  QG.busy = true; QG.err = ''; QG.out = ''; renderQG();
-  QG.ctrl = window.AbortController ? new AbortController() : null;
-  AIC.stream([{ role: 'system', content: qSys() }, { role: 'user', content: qgPrompt() }], function (d, full) { QG.out = full; var b = $('#qgLive'); if (b) { b.textContent = full.slice(-600); b.scrollTop = b.scrollHeight; } }, QG.ctrl ? QG.ctrl.signal : null, 4000)
-    .then(function (txt) { QG.busy = false; qgTake(txt); })
-    .catch(function (e) { QG.busy = false; QG.err = e && e.abort ? '' : (e && e.message || '生成失败'); renderQG(); });
+  QG.busy = true; QG.err = ''; QG.out = ''; QG.msg = ''; renderQG();
+  var my = QG, ctrl = QG.ctrl = window.AbortController ? new AbortController() : null;
+  AIC.ask({
+    messages: [{ role: 'system', content: qSys() }, { role: 'user', content: qgPrompt() }], signal: ctrl ? ctrl.signal : null, max: 8000, temp: 0.6, think: false, tries: 3,
+    onDelta: function (d, full) { if (QG !== my) return; QG.out = full; var b = $('#qgLive'); if (b) { b.textContent = full.slice(-600); b.scrollTop = b.scrollHeight; } },
+    check: function (txt) { var l = qgList(txt); return l.length ? l : null; },
+    onRetry: function (n, e) { if (QG !== my) return; QG.out = ''; QG.msg = (e && e.status === 429 ? '请求太频繁，' : e && e.cut ? '回复太长被截断了，' : '这次的回复没认出题目，') + '自动重新生成（第 ' + (n + 1) + ' 次）…'; renderQG(); }
+  }).then(function (o) { if (QG !== my) return; QG.busy = false; qgShow(o.val); })
+    .catch(function (e) { if (QG !== my) return; QG.busy = false; QG.err = e && e.abort ? '' : (e && e.message || '生成失败') + (e && e.parse ? '\n已经自动重试了 3 次。可以把知识点写得具体一点、少出几道，再点「重试」。' : ''); renderQG(); });
+}
+function qgShow(list) {
+  var want = QG.o.want;
+  QG.list = list; QG.pick = {}; list.forEach(function (q, i) { QG.pick[i] = 1; });
+  QG.note = want && list.length < want ? 'AI 这次只出了 ' + list.length + ' 道（要的是 ' + want + ' 道），可以先存这几道，再点「重新生成」补。' : '';
+  renderQG();
 }
 function qgTake(txt) {
-  var j = parseAIJSON(txt), arr = Array.isArray(j) ? j : j && Array.isArray(j.questions) ? j.questions : j ? [j] : [];
-  var list = arr.map(function (x) { return aiToQ(x, QG.o.base); }).filter(Boolean);
-  if (!list.length) { QG.err = '没认出题目。可以点「重新生成」，或者检查粘贴的内容是不是完整的 JSON。'; renderQG(); return; }
-  QG.list = list; QG.pick = {}; list.forEach(function (q, i) { QG.pick[i] = 1; }); renderQG();
+  var list = qgList(txt);
+  if (!list.length) { QG.err = QG.manual ? '没认出题目，请检查粘贴的内容是不是 AI 回复的完整 JSON。' : '没认出 AI 回复里的题目，点「重试」再生成一次。'; renderQG(); return; }
+  qgShow(list);
 }
 function renderQG() {
   var el = $('#qgBody'), ft = $('#qgFoot'); if (!el || !QG) return;
@@ -10242,16 +10475,17 @@ function renderQG() {
     h += '<div class="qg-list">' + QG.list.map(function (q, i) {
       return '<label class="qg-item' + (QG.pick[i] ? ' on' : '') + '"><input type="checkbox" data-chg="qg-pick" data-i="' + i + '"' + (QG.pick[i] ? ' checked' : '') + '><div class="grow"><div class="q-tags">' + qTagsHTML(q, '<span class="muted" style="font-size:12px">' + fmtNum(q.score) + ' 分</span>') + '</div>' + qBodyHTML(q, true) + '</div></label>';
     }).join('') + '</div>';
+    if (QG.note) h = '<div class="msg-warn" style="margin-bottom:10px">' + esc(QG.note) + '</div>' + h;
     f = qgListFoot();
-  } else if (!QG.manual) {
-    if (QG.busy) h += '<div class="qg-run"><span class="spin"></span>AI 正在出题，一般要 10–40 秒…</div><pre class="prompt-box" id="qgLive" style="max-height:200px">' + esc(QG.out.slice(-600)) + '</pre>';
-    if (QG.err) h += '<div class="msg-err">' + esc(QG.err).replace(/\n/g, '<br>') + '</div>';
-    f += QG.busy ? '<button class="btn btn-light" data-act="qg-stop">停止</button>' : '<button class="btn btn-light" data-act="qg-manual">改为复制提示词</button><button class="btn btn-dark" data-act="qg-again">' + ICON.refresh + '重试</button>';
-  } else {
+  } else if (QG.manual) {
     h += '<div class="qg-steps"><div><b>1</b>复制下面的提示词，发给豆包、DeepSeek、Kimi 等任意 AI</div><div><b>2</b>把 AI 的回复整段复制回来，粘贴到下面</div></div>' +
       '<div class="prompt-box" style="max-height:170px">' + esc(qSys() + '\n\n' + qgPrompt()) + '</div>' +
       '<textarea class="ta" id="qgPaste" style="min-height:110px;margin-top:10px" placeholder="把 AI 回复的内容（以 [ 开头的那一段）粘贴到这里">' + esc(QG.pasted) + '</textarea>' + (QG.err ? '<div class="msg-err" style="margin-top:8px">' + esc(QG.err) + '</div>' : '');
-    f += '<button class="btn btn-light" data-act="go" data-page="settings" data-sec="ai">配置 API，直接生成</button><button class="btn btn-light" data-act="qg-copy">' + ICON.copy + '复制提示词</button><button class="btn btn-dark" data-act="qg-parse">识别题目</button>';
+    f += '<button class="btn btn-light" data-act="go" data-page="settings" data-sec="ai" style="margin-right:auto">配置 API，直接生成</button><button class="btn btn-light" data-act="qg-copy">' + ICON.copy + '复制提示词</button><button class="btn btn-dark" data-act="qg-parse">识别题目</button>';
+  } else {
+    if (QG.busy) h += '<div class="qg-run"><span class="spin"></span>' + esc(QG.msg || 'AI 正在出题，一般要 10–40 秒…') + '</div><pre class="prompt-box" id="qgLive" style="max-height:200px">' + esc(QG.out.slice(-600)) + '</pre>';
+    if (QG.err) h += '<div class="msg-err">' + esc(QG.err).replace(/\n/g, '<br>') + '</div>';
+    f += QG.busy ? '<button class="btn btn-light" data-act="qg-stop">停止</button>' : '<button class="btn btn-light" data-act="go" data-page="settings" data-sec="ai">检查 AI 接口</button><button class="btn btn-dark" data-act="qg-again">' + ICON.refresh + '重试</button>';
   }
   el.innerHTML = h; if (ft) ft.innerHTML = f;
 }
@@ -10259,7 +10493,6 @@ UI.act['qg-copy'] = function () { copyText(qSys() + '\n\n' + qgPrompt()); };
 UI.act['qg-parse'] = function () { var t = ($('#qgPaste') || {}).value || ''; QG.pasted = t; if (!t.trim()) { UI.toast('先把 AI 的回复粘贴进来'); return; } qgTake(t); };
 UI.act['qg-stop'] = function () { if (QG.ctrl) try { QG.ctrl.abort(); } catch (e) { } QG.busy = false; renderQG(); };
 UI.act['qg-again'] = function () { QG.list = []; runQG(); };
-UI.act['qg-manual'] = function () { QG.out = ''; QG.err = ''; QG.manual = true; renderQG(); };
 UI.chg['qg-pick'] = function (el) { var i = el.getAttribute('data-i'); if (el.checked) QG.pick[i] = 1; else delete QG.pick[i]; el.closest('.qg-item').classList.toggle('on', el.checked); var ft = $('#qgFoot'); if (ft) ft.innerHTML = qgListFoot(); };
 UI.act['qg-do'] = function (el) {
   var a = el.getAttribute('data-a'), list = QG.list.filter(function (q, i) { return QG.pick[i]; });
@@ -10279,12 +10512,14 @@ function saveToBank(list, src) {
 var QV = null;
 function qVariant(q, ctx) {
   QV = { q: q, ctx: ctx || {}, mode: 'data', to: q.type === 'choice' ? 'blank' : 'choice', n: 3 };
-  UI.modal({ title: '出变式题', wide: true, body: '<div id="qvBody"></div>', foot: '<button class="btn btn-light" data-act="modal-close">取消</button><button class="btn btn-dark" data-act="qv-go">' + ICON.spark + (AIC.ready() ? '让 AI 出题' : '生成提示词') + '</button>' });
+  UI.modal({ title: '出变式题', wide: true, body: '<div id="qvBody"></div>', foot: '<button class="btn btn-light" data-act="modal-close">取消</button><button class="btn btn-dark" data-act="qv-go">' + ICON.spark + (AIC.ready() || !QAI.prompt ? '让 AI 出题' : '生成提示词') + '</button>' });
   renderQV();
 }
 function renderQV() {
   var q = QV.q, h = '<div class="qv-src"><div class="q-tags">' + qTagsHTML(q) + '</div>' + qBodyHTML(q, true) + (q.img ? '<div class="muted" style="font-size:12px;margin-top:6px">这道题有图，AI 只看文字出题；有图的题建议选「换数据」或「同类新题」</div>' : '') + '</div>';
   var modes = [['data', '换数据', '题型和考法不变，换数字、换字母，答案重新算'], ['type', '换题型', '同一个知识点，换成别的题型来考'], ['scene', '换情境', '换一个生活情境或说法，考同一个方法'], ['new', '同类新题', '同一个知识点，出难度相近的新题']];
+  QAI.cont.qv = function () { qVariant(QV.q, QV.ctx); };
+  if (!aiOK()) h += '<div style="margin-top:14px">' + aiGateHTML('让 AI 出变式题', false, 'qv') + '</div>';
   h += '<div class="field" style="margin-top:14px"><label>怎么变</label><div class="qv-modes">' + modes.map(function (m) { return '<button type="button" class="' + (QV.mode === m[0] ? 'on' : '') + '" data-act="qv-mode" data-v="' + m[0] + '"><b>' + m[1] + '</b><small>' + m[2] + '</small></button>'; }).join('') + '</div></div>';
   if (QV.mode === 'type') h += '<div class="field"><label>换成</label><div class="chips">' + QT.filter(function (t) { return t.id !== q.type && ['choice', 'judge', 'blank', 'calc', 'answer', 'short'].indexOf(t.id) >= 0; }).map(function (t) { return '<button type="button" class="' + (QV.to === t.id ? 'on' : '') + '" data-act="qv-to" data-v="' + t.id + '">' + t.t + '</button>'; }).join('') + '</div></div>';
   h += '<div class="field"><label>出几道</label><div class="chips">' + [1, 2, 3, 5].map(function (n) { return '<button type="button" class="' + (QV.n === n ? 'on' : '') + '" data-act="qv-n" data-v="' + n + '">' + n + ' 道</button>'; }).join('') + '</div></div>';
@@ -10311,6 +10546,7 @@ UI.act['qv-quick'] = function (el) {
   qGenModal({ title: v === 'blank' ? '选择题 → 填空题' : '选择题拆成判断题', desc: '按原题的选项和答案直接转换，不用 AI。', list: list, actions: qvActions(ctx), onDone: function (l, a) { qvDone(l, a, ctx); } });
 };
 UI.act['qv-go'] = function () {
+  if (!needAI('让 AI 出变式题', false, function () { qVariant(QV.q, QV.ctx); })) return;
   var q = QV.q, n = QV.n, ctx = QV.ctx, how = {
     data: '请出 ' + n + ' 道「换数据」的变式题：题型、考法、难度和原题一样，只换数字、字母或具体对象，答案要重新计算。',
     type: '请出 ' + n + ' 道考同一个知识点的' + qtName(QV.to) + '（把原题改编成' + qtName(QV.to) + '），难度相近。',
@@ -10455,6 +10691,7 @@ UI.act['qb-var'] = function (el) { var q = qById(el.getAttribute('data-id')); if
 /* ---------- AI 出题 ---------- */
 var QA = { type: 'choice', n: 5, diff: 2 };
 UI.act['qb-ai'] = function () {
+  if (!needAI('AI 出题', false, function () { UI.act['qb-ai'](); })) return;
   var pr = curCls() ? progOf(curCls().id) : null, cur = pr && pr.cur ? pr.cur.name.replace(/^[\d.]+\s*/, '') : '';
   var kps = allKps().slice(0, 12);
   UI.modal({
@@ -10476,7 +10713,7 @@ UI.act['qa-go'] = function () {
   var st = S.settings;
   UI.closeModal();
   qGenModal({
-    title: 'AI 出题', base: { sub: ownName(), kp: splitKp(kp), diff: QA.diff, type: QA.type, score: qtOf(QA.type).def },
+    title: 'AI 出题', want: QA.n, base: { sub: ownName(), kp: splitKp(kp), diff: QA.diff, type: QA.type, score: qtOf(QA.type).def },
     prompt: '请给' + qLevel() + '学生出 ' + QA.n + ' 道' + ownName() + qtName(QA.type) + '，考查知识点：' + kp + '；难度：' + QDIFF[QA.diff] + '。' + (more ? '其他要求：' + more + '。' : '') + '题与题之间不要雷同，覆盖不同的考法。',
     actions: [['paper', '存入题库并加入组题'], ['bank', '存入题库']],
     onDone: function (list, a) { qvDone(list, a, {}); }
@@ -10489,6 +10726,7 @@ function qiReset() { QI = { tab: 'file', text: '', list: [], pick: {}, kp: '', d
 qiReset();
 UI.act['qb-import'] = function () {
   qiReset();
+  QAI.cont.qi = function () { QI.text = ($('#qiText') || {}).value || QI.text; renderQI(); };
   UI.modal({ title: '导入题目', wide: true, body: '<div id="qiBody"></div>', foot: '<div id="qiFoot" style="display:flex;gap:8px;width:100%;justify-content:flex-end;align-items:center"></div>', onClose: function () { if (QI.run) { QI.run.stop = true; (QI.run.ctrls || []).forEach(function (c) { try { c.abort(); } catch (e) { } }); } } });
   renderQI();
 };
@@ -10512,10 +10750,10 @@ function renderQI() {
       if (QI.vis.length && !QI.busy) f = qiVisFoot();
     } else {
       h += QI.tab === 'paste' ? '<div class="muted" style="font-size:12.5px;line-height:1.75;margin-bottom:8px">从 Word、网页里把整套题复制过来粘贴。认得「1.」这样的题号、「A.」选项、「答案：」「解析：」，也认得最后统一给的「参考答案 1-5 BCADB」。也可以从 Excel 粘贴，第一行写表头：题型、题干、选项A…选项D、答案、解析、知识点、难度、分值。<button class="lnk" data-act="qi-sample">看一个例子</button></div>' :
-        '<div class="muted" style="font-size:12.5px;line-height:1.75;margin-bottom:8px">格式比较乱（比如从图片识别出来的文字、题号选项混在一起）的，交给 AI 整理成标准格式' + (AIC.ready() ? '' : '：先生成提示词，复制给任意 AI，再把回复粘回来') + '。</div>';
+        '<div class="muted" style="font-size:12.5px;line-height:1.75;margin-bottom:8px">格式比较乱（比如从图片识别出来的文字、题号选项混在一起）的，交给 AI 整理成标准格式。</div>' + (aiOK() ? (AIC.ready() ? '' : '<div class="muted" style="font-size:12.5px;margin:-4px 0 8px">没配置 API：点下面的按钮生成提示词，复制给任意 AI，再把回复粘回来。</div>') : '<div style="margin-bottom:10px">' + aiGateHTML('让 AI 整理', false, 'qi') + '</div>');
       h += '<textarea class="ta" id="qiText" style="min-height:240px" placeholder="把题目粘贴到这里">' + esc(QI.text) + '</textarea>';
       if (QI.err) h += '<div class="msg-err" style="margin-top:8px">' + esc(QI.err) + '</div>';
-      f += '<button class="btn btn-light" data-act="modal-close">取消</button><button class="btn btn-dark" data-act="qi-parse">' + (QI.tab === 'ai' ? ICON.spark + (AIC.ready() ? '让 AI 整理' : '生成提示词') : '识别题目') + '</button>';
+      f += '<button class="btn btn-light" data-act="modal-close">取消</button><button class="btn btn-dark" data-act="qi-parse"' + (QI.tab === 'ai' && !aiOK() ? ' disabled' : '') + '>' + (QI.tab === 'ai' ? ICON.spark + (AIC.ready() ? '让 AI 整理' : '生成提示词') : '识别题目') + '</button>';
     }
   } else {
     var n = qiPicked(), nImg = QI.list.filter(function (q) { return q._img; }).length, nEq = QI.list.filter(function (q) { return /〔(公式|图)〕/.test(q.stem + q.opts.join('') + q.ans); }).length, nAI = QI.list.filter(function (q) { return /^（AI 解答）/.test(q.ana); }).length;
@@ -10538,7 +10776,7 @@ function qiBindDrop() {
   z.addEventListener('dragover', function (e) { e.preventDefault(); z.classList.add('over'); });
   z.addEventListener('dragleave', function () { z.classList.remove('over'); });
   z.addEventListener('drop', function (e) { e.preventDefault(); z.classList.remove('over'); qiAddFiles(e.dataTransfer.files); });
-  z.addEventListener('click', function (e) { if (!e.target.closest('label')) $('#qiFile').click(); });
+  z.addEventListener('click', function (e) { if (e.target.closest('label, input, button, img, a, [data-act]')) return; var f = $('#qiFile'); if (f) f.click(); });
 }
 function qiPaste(e) {
   if (!QI || !$('#qiDrop')) return;
@@ -10669,6 +10907,7 @@ function qiVisHTML(inline) {
     return '<div class="qm-th st-' + x.st + '" title="' + esc(x.msg || x.name) + '"><img src="' + x.url + '" alt="" data-act="qi-vis-view" data-k="' + k + '"><span class="qm-st">' + { wait: '待识别', run: '<span class="spin"></span>识别中', ok: '认出 ' + (x.n || 0) + ' 道', err: '出错' }[x.st] + '</span>' + (run ? '' : '<button class="qm-x" data-act="qi-vis-rm" data-k="' + k + '" aria-label="去掉">' + ICON.x + '</button>') + '</div>';
   }).join('') + '</div>';
   if (run) h += '<div class="qg-run" style="margin-top:10px"><span class="spin"></span>' + esc(QI.run.msg || '') + '</div>';
+  else if (!ready && !QAI.prompt) h += '<div style="margin-top:12px">' + aiGateHTML('识别图片和扫描件', true, 'qi') + '</div>';
   else if (!ready) h += '<div class="qg-steps" style="margin-top:12px"><div><b>1</b>复制下面的提示词，打开豆包、通义、Kimi 等能看图的 AI（网页版或 App）</div><div><b>2</b>把这些图片（扫描版 PDF 可以直接发文件）和提示词一起发过去</div><div><b>3</b>把 AI 的回复粘贴到下面，点「识别题目」</div></div><div class="prompt-box" style="max-height:120px">' + esc(qiVisPrompt()) + '</div><textarea class="ta" id="qiVisPaste" style="min-height:90px;margin-top:8px" placeholder="把 AI 回复的内容（以 [ 开头的那一段）粘贴到这里"></textarea>';
   if (QI.err) h += '<div class="msg-err" style="margin-top:8px">' + esc(QI.err) + '</div>';
   if (inline) h += '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px">' + qiVisFoot(true) + '</div>';
@@ -10676,26 +10915,28 @@ function qiVisHTML(inline) {
 }
 function qiVisFoot(inline) {
   var run = QI.run && !QI.run.stop, ready = AIC.ready(), f = '<button class="btn btn-ghost' + (inline ? ' btn-sm' : '') + '" data-act="qi-vis-clear" style="margin-right:auto"' + (run ? ' disabled' : '') + '>' + (inline ? '不要这些图片' : '换别的文件') + '</button>';
-  if (inline) return f.replace(/class="btn /, 'class="btn btn-sm ') + (run ? '<button class="btn btn-sm btn-light" data-act="qi-vis-stop">停止</button>' : ready ? '<button class="btn btn-sm btn-dark" data-act="qi-vis-go">' + ICON.spark + '让 AI 识别（' + QI.vis.filter(function (x) { return x.st !== 'ok'; }).length + ' 张）</button>' : '<button class="btn btn-sm btn-light" data-act="qi-vis-copy">' + ICON.copy + '复制提示词</button><button class="btn btn-sm btn-dark" data-act="qi-vis-parse">识别题目</button>');
+  if (inline) return f + (run ? '<button class="btn btn-sm btn-light" data-act="qi-vis-stop">停止</button>' : ready ? '<button class="btn btn-sm btn-dark" data-act="qi-vis-go">' + ICON.spark + '让 AI 识别（' + QI.vis.filter(function (x) { return x.st !== 'ok'; }).length + ' 张）</button>' : QAI.prompt ? '<button class="btn btn-sm btn-light" data-act="qi-vis-copy">' + ICON.copy + '复制提示词</button><button class="btn btn-sm btn-dark" data-act="qi-vis-parse">识别题目</button>' : '');
   if (run) return f + '<button class="btn btn-light" data-act="qi-vis-stop">停止</button>';
-  if (ready) return f + '<button class="btn btn-light" data-act="qi-vis-copy">' + ICON.copy + '复制提示词</button><button class="btn btn-dark" data-act="qi-vis-go">' + ICON.spark + '让 AI 识别（' + QI.vis.filter(function (x) { return x.st !== 'ok'; }).length + ' 张）</button>';
-  return f + '<button class="btn btn-light" data-act="go" data-page="settings" data-sec="ai">配置 API，直接识别</button><button class="btn btn-light" data-act="qi-vis-copy">' + ICON.copy + '复制提示词</button><button class="btn btn-dark" data-act="qi-vis-parse">识别题目</button>';
+  if (ready) return f + '<button class="btn btn-dark" data-act="qi-vis-go">' + ICON.spark + '让 AI 识别（' + QI.vis.filter(function (x) { return x.st !== 'ok'; }).length + ' 张）</button>';
+  if (QAI.prompt) return f + '<button class="btn btn-light" data-act="go" data-page="settings" data-sec="ai">配置 API，直接识别</button><button class="btn btn-light" data-act="qi-vis-copy">' + ICON.copy + '复制提示词</button><button class="btn btn-dark" data-act="qi-vis-parse">识别题目</button>';
+  return f + '<button class="btn btn-light" data-act="modal-close">取消</button>';
 }
 UI.act['qi-vis-view'] = function (el) { var x = QI.vis[+el.getAttribute('data-k')]; UI.lightbox(x.url, x.name); };
 UI.act['qi-vis-rm'] = function (el) { QI.vis.splice(+el.getAttribute('data-k'), 1); renderQI(); };
 UI.act['qi-vis-clear'] = function () { QI.vis = []; QI.err = ''; renderQI(); };
-UI.act['qi-vis-copy'] = function () { copyText(qiVisPrompt()); };
 UI.act['qi-vis-stop'] = function () { if (QI.run) { QI.run.stop = true; (QI.run.ctrls || []).forEach(function (c) { try { c.abort(); } catch (e) { } }); } QI.vis.forEach(function (x) { if (x.st === 'run') x.st = 'wait'; }); QI.run = null; renderQI(); };
-function qiTakeJSON(txt, src) {
-  var j = parseAIJSON(txt), arr = Array.isArray(j) ? j : j && Array.isArray(j.questions) ? j.questions : j ? [j] : [];
-  return arr.map(function (x) { var q = aiToQ(x, { sub: ownName(), kp: [], diff: 2 }); if (q) { q.src = src || ''; if (!q.score) q.score = qtOf(q.type).def; } return q; }).filter(Boolean);
-}
+UI.act['qi-vis-copy'] = function () { copyText(qiVisPrompt()); };
 UI.act['qi-vis-parse'] = function () {
   var t = ($('#qiVisPaste') || {}).value || ''; if (!t.trim()) { UI.toast('先把 AI 的回复粘贴进来'); return; }
   var list = qiTakeJSON(t); if (!list.length) { QI.err = '没认出题目，请把 AI 回复的 JSON 整段粘贴进来。'; renderQI(); return; }
   QI.err = ''; QI.vis = []; qiAdd(list); renderQI();
 };
+function qiTakeJSON(txt, src) {
+  var arr = aiList(parseAIJSON(txt));
+  return arr.map(function (x) { var q = aiToQ(x, { sub: ownName(), kp: [], diff: 2 }); if (q) { q.src = src || ''; if (!q.score) q.score = qtOf(q.type).def; } return q; }).filter(Boolean);
+}
 UI.act['qi-vis-go'] = function () {
+  if (!AIC.ready()) return;
   var todo = QI.vis.filter(function (x) { return x.st !== 'ok'; }); if (!todo.length) return;
   var run = QI.run = { stop: false, ctrls: [], msg: '', ok: 0, n: 0 }, qi = 0, text = qiVisPrompt(), got = [];
   QI.err = '';
@@ -10704,10 +10945,11 @@ UI.act['qi-vis-go'] = function () {
     var x = todo[qi++]; if (!x) return Promise.resolve();
     x.st = 'run'; run.msg = '正在识别第 ' + Math.min(qi, todo.length) + ' / ' + todo.length + ' 张，一张一般要 20–60 秒…'; renderQI();
     var ctrl = window.AbortController ? new AbortController() : null; if (ctrl) run.ctrls.push(ctrl);
-    return AIC.stream(AIC.visionMsgs(text, [x.url]), function () { }, ctrl ? ctrl.signal : null, 6000, AIC.vmodel()).then(function (txt) {
+    return AIC.ask({ messages: AIC.visionMsgs(text, [x.url]), signal: ctrl ? ctrl.signal : null, max: 8000, model: AIC.vmodel(), temp: 0.1, think: false, tries: 3,
+      check: function (txt) { var l = qiTakeJSON(txt); return l.length ? l : null; },
+      onRetry: function (n) { if (!run.stop) { run.msg = '第 ' + qi + ' 张没识别好，自动重试（' + n + '）…'; renderQI(); } } }).then(function (o) {
       if (run.stop) return;
-      var l = qiTakeJSON(txt); x.n = l.length; x.list = l;
-      if (l.length) { x.st = 'ok'; run.ok++; } else { x.st = 'err'; x.msg = 'AI 的回复里没认出题目：' + String(txt || '').slice(0, 80); }
+      var l = o.val; x.n = l.length; x.list = l; x.st = 'ok'; run.ok++;
     }, function (e) {
       if (run.stop) return;
       x.st = 'err'; x.msg = e && e.message || '出错了';
@@ -10715,7 +10957,8 @@ UI.act['qi-vis-go'] = function () {
       else if (e && e.status === 400) QI.err = '模型返回了错误：' + (e.message || '') + '。可能是这个模型不能看图，到「设置 → AI 接口」换一个识图模型试试。';
     }).then(next);
   }
-  Promise.all([next(), next()]).then(function () {
+  var ws = []; for (var w = 0; w < Math.min(qmConc(), todo.length); w++) ws.push(next());
+  Promise.all(ws).then(function () {
     if (QI.run !== run) return;
     QI.run = null;
     QI.vis.forEach(function (x) { if (x.st === 'run') x.st = 'wait'; });
@@ -10723,7 +10966,7 @@ UI.act['qi-vis-go'] = function () {
     ok.forEach(function (x) { qiAdd(x.list); });
     QI.vis = QI.vis.filter(function (x) { return x.st !== 'ok'; });
     renderQI();
-    if (!ok.length && !QI.err) UI.toast('没识别出题目，可以再试一次，或者用「复制提示词」到 AI 网页版里识别', 3600);
+    if (!ok.length && !QI.err) UI.toast('没识别出题目，可以再试一次；还不行的话到「设置 → AI 接口」点「测试识图」检查一下识图模型', 4200);
   });
   renderQI();
 };
@@ -10731,6 +10974,7 @@ UI.act['qi-parse'] = function () {
   var t = ($('#qiText') || {}).value || ''; QI.text = t; QI.err = '';
   if (!t.trim()) { UI.toast('先把题目粘贴进来'); return; }
   if (QI.tab === 'ai') {
+    if (!aiOK()) return;
     UI.closeModal();
     qGenModal({ title: 'AI 整理题目', desc: '把粘贴的内容整理成一道一道的题，原题不改写。', base: { sub: ownName(), kp: [], diff: 2 },
       prompt: '下面是从试卷或资料里复制出来的' + ownName() + '题目，格式比较乱。请把它整理成一道一道的题：保留原题的题干、选项和答案，不要改写题目内容，不要自己加题；如果原文里有答案就照抄，没有答案的请你给出正确答案，并在解析开头写「（AI 解答）」；解析可以简要补上；顺便判断每道题的知识点和难度。\n\n【原文】\n' + t.slice(0, 12000),
@@ -10966,11 +11210,11 @@ function renderQS() {
     }).join('') + '</div></div>' +
     '<div class="field"><label>难度</label><div class="seg light">' + [['easy', '基础为主'], ['mid', '均衡'], ['hard', '提高']].map(function (d) { return '<button type="button" class="' + (QS.diff === d[0] ? 'on' : '') + '" data-act="qs-diff" data-v="' + d[0] + '">' + d[1] + '</button>'; }).join('') + '</div></div>' +
     '<div class="field"><label>挑出来的题</label><div class="qs-modes">' + [['orig', '用原题', '题库里的题原样放进卷子'], ['var', '同题型换数据', '题型、考法不变，换数字和对象，答案重新算（要用 AI）']].map(function (m) { return '<button type="button" class="' + (QS.mode === m[0] ? 'on' : '') + '" data-act="qs-mode" data-v="' + m[0] + '"><b>' + m[1] + '</b><small>' + m[2] + '</small></button>'; }).join('') + '</div>' +
-    (QS.mode === 'var' ? '<div class="hint" style="margin-top:6px">适合给学过的题出「同类练习」：学生见过原题，换了数据还得自己重新算。有配图的题、阅读和作文保留原题。<label class="chk" style="margin-top:6px"><input type="checkbox" data-chg="qs-shuf"' + (QS.shuf ? ' checked' : '') + '> 选择题顺便打乱选项顺序</label></div>' : '') + '</div>' +
+    (QS.mode === 'var' ? '<div class="hint" style="margin-top:6px">适合给学过的题出「同类练习」：学生见过原题，换了数据还得自己重新算。有配图的题、阅读和作文保留原题。' + (aiOK() && !AIC.ready() ? '没配置 API，挑好题后会给你提示词。' : '') + '<label class="chk" style="margin-top:6px"><input type="checkbox" data-chg="qs-shuf"' + (QS.shuf ? ' checked' : '') + '> 选择题顺便打乱选项顺序</label></div>' + (aiOK() ? '' : '<div style="margin-top:8px">' + aiGateHTML('同题型换数据', false, 'qs') + '</div>') : '') + '</div>' +
     '<label class="chk qs-chk"><input type="checkbox" data-chg="qs-fresh"' + (QS.fresh ? ' checked' : '') + '> 尽量避开最近 30 天出过的题</label>' +
     (qStats().nMarks ? '<label class="chk qs-chk"><input type="checkbox" data-chg="qs-weak"' + (QS.weak ? ' checked' : '') + '> 错得多的知识点多出一点（按「错题集」的统计）</label>' : '') +
     (p ? '<div class="field" style="margin-top:12px"><label>放到</label><div class="seg light"><button type="button" class="' + (QS.to === 'new' ? 'on' : '') + '" data-act="qs-to" data-v="new">新建一份</button><button type="button" class="' + (QS.to === 'cur' ? 'on' : '') + '" data-act="qs-to" data-v="cur">加到「' + esc(p.title.length > 12 ? p.title.slice(0, 12) + '…' : p.title) + '」</button></div></div>' : '');
-  UI.modal({ title: '智能组卷', wide: true, body: body, foot: '<span class="muted" style="margin-right:auto;font-size:12.5px;align-self:center">共 ' + tot + ' 道</span><button class="btn btn-light" data-act="modal-close">取消</button><button class="btn btn-dark" data-act="qs-go"' + (tot ? '' : ' disabled') + '>' + (QS.mode === 'var' ? ICON.spark + '挑题并换数据' : ICON.shuffle + '挑题') + '</button>', noFocus: true });
+  UI.modal({ title: '智能组卷', wide: true, body: body, foot: '<span class="muted" style="margin-right:auto;font-size:12.5px;align-self:center">共 ' + tot + ' 道</span><button class="btn btn-light" data-act="modal-close">取消</button><button class="btn btn-dark" data-act="qs-go"' + (tot && (QS.mode !== 'var' || aiOK()) ? '' : ' disabled') + '>' + (QS.mode === 'var' ? ICON.spark + '挑题并换数据' : ICON.shuffle + '挑题') + '</button>', noFocus: true });
 }
 function qsKpOk(q) { var ks = Object.keys(QS.kps).filter(function (k) { return QS.kps[k]; }); return !ks.length || q.kp.some(function (k) { return QS.kps[k]; }); }
 UI.act['qs-kind'] = function (el) { QS.kind = el.getAttribute('data-v'); var plan = QS_PLAN[QS.kind], cnt = {}; S.qb.forEach(function (q) { if (qsKpOk(q)) cnt[q.type] = (cnt[q.type] || 0) + 1; }); QT.forEach(function (t) { QS.n[t.id] = Math.min(plan[t.id] || 0, cnt[t.id] || 0); }); renderQS(); };
@@ -10980,6 +11224,7 @@ UI.act['qs-diff'] = function (el) { QS.diff = el.getAttribute('data-v'); renderQ
 UI.act['qs-to'] = function (el) { QS.to = el.getAttribute('data-v'); renderQS(); };
 UI.chg['qs-fresh'] = function (el) { QS.fresh = el.checked; };
 UI.chg['qs-weak'] = function (el) { QS.weak = el.checked; };
+QAI.cont.qs = function () { renderQS(); };
 UI.act['qs-mode'] = function (el) { QS.mode = el.getAttribute('data-v'); renderQS(); };
 UI.chg['qs-shuf'] = function (el) { QS.shuf = el.checked; };
 /* 挑题：按难度偏好、知识点薄弱程度打分，同一个知识点尽量不扎堆 */
@@ -10999,6 +11244,7 @@ function qsPick(type, n, exclude) {
   return out;
 }
 UI.act['qs-go'] = function () {
+  if (QS.mode === 'var' && !aiOK()) return;
   var p = QS.to === 'cur' ? curPaper(false) : null, ex = {}, picked = [], short = [];
   if (p) p.items.forEach(function (x) { if (x.qid) ex[x.qid] = 1; });
   QT.forEach(function (t) { var n = QS.n[t.id] || 0; if (!n) return; var got = qsPick(t.id, n, ex); got.forEach(function (q) { ex[q.id] = 1; }); picked = picked.concat(got); if (got.length < n) short.push([t.id, n - got.length]); });
@@ -11010,7 +11256,8 @@ UI.act['qs-go'] = function () {
     qBatchVariant({ p: p, ids: ids, mode: 'replace', shuf: QS.shuf, short: short });
     return;
   }
-  if (short.length) {
+  if (short.length && !aiOK()) UI.toast('题库里的题不够：' + short.map(function (s) { return qtName(s[0]) + '还差 ' + s[1] + ' 道'; }).join('，') + '。配置好 AI 接口后，可以让 AI 补题', 4200);
+  else if (short.length) {
     var kpsTxt = Object.keys(QS.kps).filter(function (k) { return QS.kps[k]; }).join('、');
     UI.confirm('题库里的题不够', '已经挑了 ' + picked.length + ' 道。' + short.map(function (s) { return qtName(s[0]) + '还差 ' + s[1] + ' 道'; }).join('，') + '。要让 AI 补上吗？补的题会存进题库。', AIC.ready() ? '让 AI 补题' : '生成提示词', function () {
       qGenModal({ title: 'AI 补题', base: { sub: ownName(), kp: splitKp(kpsTxt), diff: QS.diff === 'easy' ? 1 : QS.diff === 'hard' ? 3 : 2 },
@@ -11044,6 +11291,7 @@ function qbvPrompt(items) {
 }
 var QBV = null;
 function qBatchVariant(o) {
+  if (!needAI('同题型换数据', false, function () { qBatchVariant(o); })) return;
   var items = o.p.items.filter(function (x) { return o.ids.indexOf(x.id) >= 0; }), elig = items.filter(qbvOk);
   if (!elig.length) { UI.toast('这些题都有配图或是阅读、作文，没法换数据'); return; }
   var chunks = []; for (var i = 0; i < elig.length; i += 6) chunks.push(elig.slice(i, i + 6));
@@ -11052,7 +11300,7 @@ function qBatchVariant(o) {
   if (QBV.manual) renderQBV(); else qbvRun();
 }
 function qbvTake(txt, chunk) {
-  var j = parseAIJSON(txt), arr = Array.isArray(j) ? j : j && Array.isArray(j.questions) ? j.questions : j ? [j] : [], n = 0;
+  var arr = aiList(parseAIJSON(txt)), n = 0;
   arr.forEach(function (x, k) {
     if (!x || typeof x !== 'object') return;
     var si = +(x.src || x['原题'] || x['序号']) || k + 1, orig = chunk[si - 1]; if (!orig || QBV.res[orig.id]) return;
@@ -11073,9 +11321,11 @@ function qbvRun() {
     var c = todo[qi++]; if (!c) return Promise.resolve();
     QBV.msg = 'AI 正在换数据：第 ' + Math.min(qi, todo.length) + ' / ' + todo.length + ' 组（一组 ' + c.length + ' 道，一般 20–60 秒）'; renderQBV();
     var ctrl = window.AbortController ? new AbortController() : null; if (ctrl) QBV.ctrls.push(ctrl);
-    return AIC.stream([{ role: 'system', content: qSys() }, { role: 'user', content: qbvPrompt(c) }], function () { }, ctrl ? ctrl.signal : null, 5000).then(function (txt) { if (!QBV.stop && !qbvTake(txt, c)) fail++; }, function (e) { if (QBV.stop) return; fail++; QBV.err = e && !e.abort ? (e.message || '出错了') : ''; if (e && (e.status === 401 || e.status === 403 || e.status === 404 || e.status === 402)) QBV.stop = true; }).then(next);
+    return AIC.ask({ messages: [{ role: 'system', content: qSys() }, { role: 'user', content: qbvPrompt(c) }], signal: ctrl ? ctrl.signal : null, max: 8000, temp: 0.5, think: false, tries: 3,
+      check: function (txt) { return QBV.stop || qbvTake(txt, c) ? 1 : null; } }).then(function () { }, function (e) { if (QBV.stop) return; fail++; QBV.err = e && !e.abort ? (e.message || '出错了') : ''; if (e && (e.status === 401 || e.status === 403 || e.status === 404 || e.status === 402)) QBV.stop = true; }).then(next);
   }
-  Promise.all([next(), next()]).then(function () {
+  var ws = []; for (var w = 0; w < Math.min(qmConc(), todo.length); w++) ws.push(next());
+  Promise.all(ws).then(function () {
     if (!QBV || !$('#qbvBody')) return;
     QBV.busy = false; QBV.stop = false; QBV.done = true;
     if (fail && !QBV.err) QBV.err = fail + ' 组没换成功，可以点「重试没换的」再试一次。';
@@ -11103,13 +11353,12 @@ function renderQBV() {
     var miss = QBV.elig.filter(function (q) { return !QBV.res[q.id]; }).length;
     f = '<span class="muted" style="margin-right:auto;font-size:12.5px">AI 换的数据请过目，答案不对的可以换进去以后再改</span>' + (miss && !QBV.busy && !QBV.manual ? '<button class="btn btn-light" data-act="qbv-retry">' + ICON.refresh + '重试没换的（' + miss + '）</button>' : '') +
       '<button class="btn btn-dark" data-act="qbv-ok"' + (QBV.busy || (!picked && o.mode !== 'bpaper') ? ' disabled' : '') + '>' + (o.mode === 'bpaper' ? '生成 B 卷' + (picked ? '（换了 ' + picked + ' 道）' : '') : '换进试卷（' + picked + ' 道）') + '</button>';
-  } else if (!QBV.manual && !QBV.busy) f = '<button class="btn btn-light" data-act="qbv-manual">改为复制提示词</button><button class="btn btn-dark" data-act="qbv-retry">' + ICON.refresh + '重试</button>';
+  } else if (!QBV.busy && !QBV.manual) f = '<button class="btn btn-light" data-act="go" data-page="settings" data-sec="ai">检查 AI 接口</button><button class="btn btn-dark" data-act="qbv-retry">' + ICON.refresh + '重试</button>';
   else if (QBV.busy) f = '<button class="btn btn-light" data-act="qbv-stop">停止</button>';
   el.innerHTML = h; if (ft) ft.innerHTML = f;
 }
 UI.act['qbv-copy'] = function () { copyText(qSys() + '\n\n' + qbvPrompt(QBV.elig)); };
 UI.act['qbv-parse'] = function () { var t = ($('#qbvPaste') || {}).value || ''; if (!t.trim()) { UI.toast('先把 AI 的回复粘贴进来'); return; } var n = qbvTake(t, QBV.elig); QBV.err = n ? '' : '没认出结果，请把 AI 回复的 JSON 整段粘贴进来。'; QBV.done = !!n; renderQBV(); };
-UI.act['qbv-manual'] = function () { QBV.manual = true; QBV.err = ''; renderQBV(); };
 UI.act['qbv-retry'] = function () { qbvRun(); };
 UI.act['qbv-stop'] = function () { QBV.stop = true; QBV.ctrls.forEach(function (c) { try { c.abort(); } catch (e) { } }); QBV.busy = false; QBV.done = true; renderQBV(); };
 UI.chg['qbv-pick'] = function (el) { var id = el.getAttribute('data-id'); QBV.pick[id] = el.checked ? 1 : 0; el.closest('.qbv-it').classList.toggle('on', el.checked); var sc = $('#qbvBody') ? $('#qbvBody').closest('.modal-body') : null, t = sc ? sc.scrollTop : 0; renderQBV(); if (sc) sc.scrollTop = t; };
@@ -11138,10 +11387,11 @@ UI.act['qbv-ok'] = function () {
 UI.act['qp-b'] = function () {
   var p = curPaper(false); if (!p || !p.items.length) return;
   var nc = p.items.filter(function (q) { return qShuffleOpts(q); }).length, nv = p.items.filter(qbvOk).length;
-  QP.b = { shuf: nc > 0, vary: true };
+  var ready = aiOK(); QP.b = { shuf: nc > 0, vary: ready };
+  QAI.cont.qpb = function () { UI.act['qp-b'](); };
   UI.modal({ title: '出 B 卷：' + esc(p.title), body: '<div class="muted" style="font-size:13px;line-height:1.75;margin-bottom:12px">生成一份题型、题量、分值都一样的平行卷，原卷不动。适合分 AB 卷考试，或者讲评后再练一遍。</div>' +
     '<label class="qm-opt"><input type="checkbox" data-chg="qp-b" data-k="shuf"' + (nc ? ' checked' : ' disabled') + '><div><b>选择题打乱选项顺序</b><small>' + (nc ? nc + ' 道选择题可以打乱，答案跟着调整，不用 AI' : '没有可以打乱的选择题') + '</small></div></label>' +
-    '<label class="qm-opt"><input type="checkbox" data-chg="qp-b" data-k="vary" checked><div><b>同题型换数据</b><small>' + nv + ' 道题交给 AI 换数字和对象，答案重新算；有配图的题、阅读和作文保留原题' + (AIC.ready() ? '' : '。没配置 API 的话会给你提示词，复制到任意 AI 里用') + '</small></div></label>',
+    '<label class="qm-opt' + (ready ? '' : ' off') + '"><input type="checkbox" data-chg="qp-b" data-k="vary"' + (ready ? ' checked' : ' disabled') + '><div><b>同题型换数据</b><small>' + nv + ' 道题交给 AI 换数字和对象，答案重新算；有配图的题、阅读和作文保留原题' + (!ready ? '。要先配置 AI 接口' : AIC.ready() ? '' : '。没配置 API，会给你提示词') + '</small></div></label>' + (ready ? '' : '<div style="margin-top:10px">' + aiGateHTML('同题型换数据', false, 'qpb') + '</div>'),
     foot: '<button class="btn btn-light" data-act="modal-close">取消</button><button class="btn btn-dark" data-act="qp-b-go">下一步</button>' });
 };
 UI.chg['qp-b'] = function (el) { QP.b[el.getAttribute('data-k')] = el.checked; };
@@ -11149,7 +11399,7 @@ UI.act['qp-b-go'] = function () {
   var p = curPaper(false), o = QP.b;
   if (!o.shuf && !o.vary) { UI.toast('至少选一个'); return; }
   UI.closeModal();
-  if (o.vary) { qBatchVariant({ p: p, ids: p.items.map(function (q) { return q.id; }), mode: 'bpaper', shuf: o.shuf }); return; }
+  if (o.vary && aiOK()) { qBatchVariant({ p: p, ids: p.items.map(function (q) { return q.id; }), mode: 'bpaper', shuf: o.shuf }); return; }
   var x = normPaper(deepClone(p)), sh = 0; x.id = uid('pp'); x.title = p.title + '（B 卷）'; x.pub = { exam: '', hw: {} }; x.ct = x.ut = Date.now(); x.date = todayStr();
   x.items = x.items.map(function (q) { var y = qShuffleOpts(q) || q; if (y !== q) sh++; y.id = uid('pi'); return y; });
   S.papers.push(x); QP.pid = x.id; save(); UI.go('qpaper'); UI.toast('生成了「' + x.title + '」，打乱了 ' + sh + ' 道选择题的选项');
@@ -11161,8 +11411,14 @@ UI.act['qp-b-go'] = function () {
    ========================================================= */
 var QM = { pid: '', cid: '', imgs: [], per: 1, run: null, ansMode: false, unk: [] };
 
-/* ---------- 识图模型：没单独填就用「模型名称」 ---------- */
-AIC.vmodel = function () { var a = S.settings.ai; return (a.vmodel || '').trim() || a.model; };
+/* ---------- 识图模型 ---------- */
+/* 没单独填识图模型：通义、智谱、Ollama 的默认模型不能看图，用这家默认的识图模型（接口地址没改过时） */
+AIC.vmodel = function () {
+  var a = S.settings.ai, v = (a.vmodel || '').trim(), pr = presetOf(a.provider);
+  if (v) return v;
+  if (pr.vmodel && pr.id === a.provider && String(a.base || '').replace(/\/+$/, '') === pr.base.replace(/\/+$/, '')) return pr.vmodel;
+  return a.model;
+};
 AIC.visionMsgs = function (text, urls) {
   var a = S.settings.ai;
   if (AIC.isClaude()) return [{ role: 'user', content: urls.map(function (u) { var k = u.indexOf(','); return { type: 'image', source: { type: 'base64', media_type: u.slice(5, u.indexOf(';')), data: u.slice(k + 1) } }; }).concat([{ type: 'text', text: text }]) }];
@@ -11214,7 +11470,7 @@ function renderQmMain() {
   if (!c) { el.innerHTML = h; return; }
   h += qmPhotoHTML(p);
   if (QM.unk.length) h += qmUnkHTML(c);
-  h += '<div class="panel qm-gridp"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px"><div class="panel-title">逐题得分</div><span class="muted" style="font-size:12.5px">每格填这道题的得分；Enter 跳到下一位同学</span><span class="grow"></span>' +
+  h += '<div class="panel qm-gridp"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px"><div class="panel-title">逐题得分</div><span class="muted" style="font-size:12.5px">每格填这道题的得分；Enter 跳到下一位同学。表头三行：题号 · <span style="color:#1d9a57">标准答案</span> · 分值</span><span class="grow"></span>' +
     (p.items.some(isObj) ? '<label class="chk"><input type="checkbox" data-chg="qm-ans-mode"' + (QM.ansMode ? ' checked' : '') + '> 客观题按答案录（输入 ABCD / 对错 / 填空答案，自动判分）</label>' : '') + '</div>' +
     '<div class="tbl-wrap qm-wrap">' + qmGridHTML(p, c, m) + '</div><div class="muted" style="font-size:12px;margin-top:8px">点学生姓名可以逐份核对：左边看答卷，右边改答案和得分。</div></div>';
   el.innerHTML = h;
@@ -11249,7 +11505,7 @@ function qmGridHTML(p, c, m) {
   var secs = paperSecs(p), stu = studentsOf(c.id), errN = {};
   if (m) p.items.forEach(function (q, i) { var n = 0, w = 0; stu.forEach(function (s) { var r = m.rows[s.id]; if (r && typeof r.g[i] === 'number') { n++; if (r.g[i] < q.score) w++; } }); errN[i] = n ? w + '/' + n : ''; });
   var h = '<table class="qm-tbl"><thead><tr><th rowspan="2" class="sk">学号</th><th rowspan="2" class="sk2">姓名</th><th rowspan="2" class="r">总分</th>' + secs.map(function (s) { return '<th colspan="' + s.items.length + '" class="sec">' + s.cn + '、' + s.t + '</th>'; }).join('') + '</tr><tr>' +
-    p.items.map(function (q, i) { var tip = '第 ' + (i + 1) + ' 题 · ' + qtName(q.type) + ' · ' + fmtNum(q.score) + ' 分' + (q.ans ? '<br>答案：' + esc(q.ans.slice(0, 40)) : '') + (q.stem ? '<br>' + esc(qShort(q, 40)) : '') + (errN[i] ? '<br>错 ' + errN[i] : ''); return '<th class="qh" data-tip="' + esc(tip) + '"><b>' + (i + 1) + '</b><small>' + (isObj(q) && q.ans.length <= 4 ? esc(q.ans) : fmtNum(q.score) + '分') + '</small></th>'; }).join('') + '</tr></thead><tbody>';
+    p.items.map(function (q, i) { var tip = '第 ' + (i + 1) + ' 题 · ' + qtName(q.type) + ' · ' + fmtNum(q.score) + ' 分' + (q.ans ? '<br>答案：' + esc(q.ans.slice(0, 40)) : '') + (q.stem ? '<br>' + esc(qShort(q, 40)) : '') + (errN[i] ? '<br>错 ' + errN[i] : ''); var an = isObj(q) && q.ans ? String(q.ans) : ''; return '<th class="qh" data-tip="' + esc(tip) + '"><b>' + (i + 1) + '</b><small class="qa' + (an ? '' : ' none') + '">' + (an ? esc(an.length > 5 ? an.slice(0, 4) + '…' : an) : isObj(q) ? '未填' : '主观') + '</small><small class="qs">' + fmtNum(q.score) + '分</small></th>'; }).join('') + '</tr></thead><tbody>';
   stu.forEach(function (s, ri) {
     var r = m && m.rows[s.id], tot = rowTotal(p, r), done = rowDone(p, r);
     h += '<tr data-sid="' + s.id + '"><td class="sk num muted">' + esc(s.no || '') + '</td><td class="sk2"><button class="qm-nm" data-act="qm-rev" data-sid="' + s.id + '" title="逐份核对' + (r && r.rv ? '（已核对）' : '') + '">' + stuNmH(s) + '</button>' + (r && r.rv ? '<span class="qm-rv" title="已核对">' + ICON.check + '</span>' : '') + (r ? '<span class="qm-src ' + r.src + '" title="' + (r.src === 'ai' ? 'AI 批改' : '手动录入') + (r.note ? '：' + esc(r.note) : '') + '">' + (r.src === 'ai' ? 'AI' : '手') + '</span>' : '') + '</td><td class="r num qm-tot' + (done ? '' : ' part') + '">' + (tot === null ? '' : fmtNum(tot)) + '</td>';
@@ -11295,16 +11551,18 @@ function qmPhotoHTML(p) {
       var g = Math.floor(k / QM.per), first = k % QM.per === 0, s = x.sid ? stuById(x.sid) : null;
       return '<div class="qm-th st-' + x.st + (first ? ' first' : '') + '" title="' + esc(x.msg || x.name) + '">' + (first && QM.per > 1 ? '<span class="qm-g">第 ' + (g + 1) + ' 份</span>' : '') + '<img src="' + x.url + '" alt="" data-act="qm-view" data-k="' + k + '"><span class="qm-st">' + { wait: '待批', run: '<span class="spin"></span>批改中', ok: s ? esc(s.name) : '已批', err: '出错', unk: '没认出' }[x.st] + '</span>' + (running ? '' : '<button class="qm-x" data-act="qm-rm" data-k="' + k + '" aria-label="去掉这张">' + ICON.x + '</button>') + '</div>';
     }).join('') + (running ? '' : '<label class="qm-th add" for="qmFile">' + ICON.plus + '<span>再加</span></label>') + '</div>' : '') + '</div>';
+  if (!ready && !QAI.prompt) h += '<div style="margin-top:12px">' + aiGateHTML('拍照 / 扫描批改', true, 'qm') + '</div>';
   h += '<div class="qm-photo-foot">';
   if (n) h += '<span class="muted" style="font-size:12.5px">' + n + ' 张照片 · 按每人 ' + QM.per + ' 张算是 ' + groups + ' 位同学' + (done ? ' · 已批 ' + done + ' 张' : '') + '</span>';
+  else if (!ready && QAI.prompt) h += '<span class="muted" style="font-size:12.5px">现在是复制提示词的方式：点「复制提示词批改」，连同答卷照片一起发给能看图的 AI，再把结果粘贴回来。</span>';
   else h += '<span class="muted" style="font-size:12.5px">照片里的姓名、字迹会发给你在设置里配置的 AI 服务；介意的话可以让学生只写学号。照片批完不保存。</span>';
   h += '<span class="grow"></span>';
   if (running) h += '<span class="muted" style="font-size:12.5px"><span class="spin"></span>' + esc(QM.run.msg || '') + '</span><button class="btn btn-sm btn-light" data-act="qm-stop">停止</button>';
   else {
     if (n) h += '<button class="btn btn-sm btn-ghost" data-act="qm-clear">清空照片</button>';
     if (done) h += '<button class="btn btn-sm btn-light" data-act="qm-rev-first">' + ICON.check + '逐份核对</button>';
-    h += '<button class="btn btn-sm btn-light" data-act="qm-prompt">' + ICON.copy + (ready ? '复制提示词' : '没配置 API：复制提示词') + '</button>';
-    if (ready) h += '<button class="btn btn-sm btn-dark" data-act="qm-go"' + (QM.imgs.some(function (x) { return x.st !== 'ok'; }) ? '' : ' disabled') + '>' + ICON.spark + '开始 AI 批改' + (n ? '（' + Math.ceil(QM.imgs.filter(function (x) { return x.st !== 'ok'; }).length / QM.per) + ' 份）' : '') + '</button>';
+    if (!ready && QAI.prompt) h += '<button class="btn btn-sm btn-dark" data-act="qm-prompt">' + ICON.copy + '复制提示词批改</button>';
+    else h += '<button class="btn btn-sm btn-dark" data-act="qm-go"' + (QM.imgs.some(function (x) { return x.st !== 'ok'; }) ? '' : ' disabled') + '>' + ICON.spark + '开始 AI 批改' + (n ? '（' + Math.ceil(QM.imgs.filter(function (x) { return x.st !== 'ok'; }).length / QM.per) + ' 份）' : '') + '</button>';
   }
   return h + '</div></div>';
 }
@@ -11323,7 +11581,8 @@ function qmPaste(e) {
 }
 UI.chg['qm-files'] = function (el) { qmAddFiles(el.files); el.value = ''; };
 function qmAddFiles(files) {
-  if (QM.run && !QM.run.stop) return;
+  if (QM.run && !QM.run.stop) { UI.toast('正在批改，批完再加照片；也可以先点「停止」'); return; }
+  if (QM.reading) { UI.toast('上一批照片还在读取，稍等一下'); return; }
   var all = Array.prototype.slice.call(files || []), list = all.filter(function (f) { var k = fileKind(f); return k === 'img' || k === 'pdf'; });
   if (!list.length) { UI.toast('只能放图片（JPG / PNG）或扫描出来的 PDF'); return; }
   list.sort(function (a, b) { return String(a.name || '').localeCompare(String(b.name || ''), 'zh', { numeric: true }); });
@@ -11342,15 +11601,19 @@ function qmAddFiles(files) {
       })();
     }, function () { bad++; return []; });
   }
-  var res = [], i = 0;
+  var res = [], i = 0, tip = function (t) { var o = $('.qm-photo-foot .muted'); if (o) o.textContent = t; };
+  QM.reading = true;
   (function next() {
     if (i >= list.length) {
+      QM.reading = false;
       QM.imgs = QM.imgs.concat(res); qmRefreshPhoto();
+      if (res.length && !msgs.length && !bad) UI.toast('加进 ' + res.length + ' 张，共 ' + QM.imgs.length + ' 张' + (QM.per === 1 && res.length > 1 ? '。一位同学有几张答卷的，先在右上角选「每位同学 n 张」' : ''), 3600);
       if (msgs.length) UI.toast(msgs.join('；'), 5200);
       else if (bad) UI.toast(bad + ' 张图片打不开（苹果手机的 HEIC 照片请改成 JPG，或在相机设置里选「兼容性最佳」）', 4200);
       return;
     }
-    one(list[i++]).then(function (arr) { res = res.concat(arr); next(); });
+    if (list.length > 1 && fileKind(list[i]) !== 'pdf') tip('正在读取第 ' + (i + 1) + ' / ' + list.length + ' 张照片…');
+    one(list[i++]).then(function (arr) { res = res.concat(arr); next(); }, function () { bad++; next(); });
   })();
 }
 UI.act['qm-per'] = function (el) { QM.per = +el.getAttribute('data-v'); qmRefreshPhoto(); };
@@ -11380,8 +11643,8 @@ function qmPromptText(p, many) {
     (p.key ? '   这是学校统一印的答题卡：选择题、判断题如果是涂卡（填涂方框）的，以涂黑的选项为准，涂得很淡或者擦过的要看清楚；主观题看对应题号框里写的内容，写到框外的也要看。\n' : '') +
     '3. 选择题、判断题和标准答案一致得满分，否则 0 分；多选题选对但不全得一半分，有错选 0 分；填空题和标准答案等价的（写法不同但意思或数学上相同）也算对。\n' +
     '4. 计算题、解答题等主观题按参考答案和评分要点给步骤分，可以是 0.5 的倍数，不超过这题的分值；只写结果没有过程的酌情扣分。\n' +
-    '5. 只输出 JSON，不要任何解释：' + (many ? '一个数组，每位学生一个对象 [' : '') + '{"no":"学号","name":"姓名","items":[{"n":1,"ans":"学生答案","score":得分}],"comment":"一句话点评，指出主要问题"}' + (many ? ', ...]' : '') + '\n' +
-    '6. items 要包含全部 ' + p.items.length + ' 道题，n 是题号。';
+    '5. 数学式用普通文字和符号写（x²、√2、3/4、≥），不要用 LaTeX。只输出 JSON，不要任何解释，也不要用代码块：' + (many ? '一个数组，每位学生一个对象 [' : '') + '{"no":"学号","name":"姓名","items":[{"n":1,"ans":"学生答案","score":得分}],"comment":"一句话点评，指出主要问题"}' + (many ? ', ...]' : '') + '\n' +
+    '6. items 要包含全部 ' + p.items.length + ' 道题，n 是题号（数字）。照片上没有的题（比如在另一张答卷上）ans 写 "-"、score 写 null，不要当成没作答。';
 }
 UI.act['qm-prompt'] = function () {
   var p = paperById(QM.pid), t = qmPromptText(p, true);
@@ -11395,13 +11658,14 @@ UI.act['qm-prompt'] = function () {
 };
 UI.act['qm-prompt-copy'] = function () { copyText(UI.modalCtx.text); };
 UI.act['qm-paste-go'] = function () {
-  var t = $('#qmPaste').value, j = parseAIJSON(t), arr = Array.isArray(j) ? j : j ? [j] : [];
+  var t = $('#qmPaste').value, arr = qmRes(parseAIJSON(t));
   if (!arr.length) { UI.toast('没认出结果，请把 AI 回复的 JSON 整段粘贴进来'); return; }
   var p = paperById(QM.pid), m = ensureMark(p.id, QM.cid), ok = 0;
   arr.forEach(function (res) { var s = qmApply(p, m, res); if (s) ok++; else QM.unk.push({ res: res, imgs: [] }); });
   save(); UI.closeModal(); renderQmMain(); qmRefreshList();
   UI.toast('填进 ' + ok + ' 位同学' + (arr.length - ok ? '，' + (arr.length - ok) + ' 份没认出是谁，在上面手动对应一下' : ''), 3200);
 };
+QAI.cont.qm = function () { renderQmMain(); };
 function qmRefreshList() { var l = $('.qm-list'), p = paperById(QM.pid); if (l && p) l.innerHTML = qmListHTML(p); }
 /* 按学号、姓名把 AI 认出来的答卷对应到学生 */
 function qmMatch(c, no, name) {
@@ -11417,73 +11681,181 @@ function qmMatch(c, no, name) {
   }
   return null;
 }
+/* ---------- AI 回的批改结果统一成 { no, name, items: [{ n, ans, score }], comment } ----------
+   各家模型写法五花八门：外面包一层 {"students": [...]}、{"result": {...}}；直接给题目数组；
+   items 写成 {"1": "A", "2": "C"}；键名中英文混用（学号 / 姓名 / 题号 / 学生答案 / 得分） */
+var QMK = {
+  no: ['no', '学号', 'studentNo', 'student_no', 'stuNo', 'sno', '考号', 'number', 'id'],
+  name: ['name', '姓名', 'studentName', 'student_name', '学生姓名', '学生', 'student'],
+  items: ['items', 'answers', '题目', '各题', '小题', '答题', '作答', 'questions', 'details', 'detail', 'results', 'result', 'list', 'scores', '得分情况'],
+  n: ['n', '题号', 'no', 'num', 'number', 'q', 'qno', 'index', '序号', 'id', 'question'],
+  ans: ['ans', 'answer', '学生答案', '作答', '答案', 'student_answer', 'studentAnswer', 'value', 'a', 'response'],
+  score: ['score', '得分', '分数', 'points', 'point', 'got', 'mark', 'marks', 's'],
+  note: ['comment', '点评', '评语', 'remark', 'summary', 'feedback']
+};
+function qmPick(o, ks) { for (var i = 0; i < ks.length; i++) { var v = o[ks[i]]; if (v !== undefined && v !== null && v !== '') return v; } return undefined; }
+function qmStr(v) { return v == null || typeof v === 'object' ? '' : String(v).trim(); }
+function qmIsItem(x) { return !!x && typeof x === 'object' && !Array.isArray(x) && !qmItemsOf(x) && (qmPick(x, QMK.ans) !== undefined || qmPick(x, QMK.score) !== undefined || x.score === null); }
+function qmItemsOf(o) {
+  for (var i = 0; i < QMK.items.length; i++) {
+    var v = o[QMK.items[i]];
+    if (Array.isArray(v) && v.length && v.every(function (x) { return x && typeof x === 'object' || typeof x === 'string' || typeof x === 'number'; }) && !v.some(function (x) { return x && typeof x === 'object' && qmItemsOf(x); })) return v.map(function (x, k) { return x && typeof x === 'object' ? x : { n: k + 1, ans: x }; });
+    if (v && typeof v === 'object' && !Array.isArray(v)) {
+      var ks = Object.keys(v); if (!ks.length || !ks.every(function (k) { return /\d/.test(k); })) continue;
+      var sc = /score|得分/.test(QMK.items[i]);
+      return ks.map(function (k) { var x = v[k]; if (x && typeof x === 'object') { var y = {}; Object.keys(x).forEach(function (kk) { y[kk] = x[kk]; }); if (y.n === undefined) y.n = k; return y; } return sc ? { n: k, score: x } : { n: k, ans: x }; });
+    }
+  }
+  return null;
+}
+function qmNum(v) { var m = String(v == null ? '' : v).match(/\d+/); return m ? +m[0] : NaN; }
+function qmRes(j) {
+  if (!j || typeof j !== 'object') return [];
+  if (Array.isArray(j)) {
+    if (j.length && j.every(qmIsItem)) return [{ no: '', name: '', items: j, comment: '', _n: 1 }];
+    return j.reduce(function (a, x) { return a.concat(qmRes(x)); }, []);
+  }
+  if (j._n) return [j];
+  var its = qmItemsOf(j);
+  if (its) {
+    var st = j.student && typeof j.student === 'object' && !Array.isArray(j.student) ? j.student : j.info && typeof j.info === 'object' ? j.info : j;
+    return [{ no: qmStr(qmPick(st, QMK.no)), name: qmStr(qmPick(st, QMK.name)), items: its.map(function (it, k) {
+      var n = qmNum(qmPick(it, QMK.n)); return { n: isNaN(n) ? k + 1 : n, ans: qmPick(it, QMK.ans), score: qmPick(it, QMK.score) };
+    }), comment: qmStr(qmPick(j, QMK.note)), _n: 1 }];
+  }
+  var ks = Object.keys(j);
+  for (var i = 0; i < ks.length; i++) { var v = j[ks[i]]; if (v && typeof v === 'object') { var r = qmRes(v); if (r.length) return r; } }
+  return [];
+}
+/* 一张一张批出来的几份结果合成一份：姓名学号取认出来的那张，每道题取有作答的那张 */
+function qmMergeRes(list) {
+  var r = { no: '', name: '', items: [], comment: '', _n: 1 }, by = {}, blank = function (it) { var a = qmStr(it && it.ans); return !it || a === '' && !(parseFloat(it.score) > 0) || /^[-—–－\/]$/.test(a); };
+  list.forEach(function (x) {
+    if (!x) return;
+    if (!r.no && x.no) r.no = x.no; if (!r.name && x.name) r.name = x.name;
+    if (x.comment) r.comment = r.comment ? r.comment + '；' + x.comment : x.comment;
+    x.items.forEach(function (it) { if (!by[it.n] || blank(by[it.n]) && !blank(it)) by[it.n] = it; });
+  });
+  r.items = Object.keys(by).map(function (k) { return by[k]; }).sort(function (a, b) { return a.n - b.n; });
+  return r;
+}
+/* 写进表格。同一位同学分几张、几次批的（第 2 页单独拍的），只补上这次认出来的题，不会用空白盖掉上一张的结果 */
 function qmApply(p, m, res, sid) {
-  if (!res || typeof res !== 'object') return null;
-  var c = clsById(m.cid), s = sid ? stuById(sid) : qmMatch(c, res.no || res['学号'], res.name || res['姓名']);
+  res = qmRes(res)[0]; if (!res) return null;
+  var c = clsById(m.cid), s = sid ? stuById(sid) : qmMatch(c, res.no, res.name);
   if (!s) return null;
-  var items = res.items || res.answers || res['题目'] || [], r = { a: [], g: [], src: 'ai', at: Date.now() }, old = m.rows[s.id];
-  if (old) { r.a = old.a.slice(); r.g = old.g.slice(); }
-  items.forEach(function (it, k) {
-    if (!it || typeof it !== 'object') return;
-    var i = (+it.n || +it['题号'] || k + 1) - 1, q = p.items[i]; if (!q) return;
-    var a = it.ans !== undefined ? it.ans : it['答案'], sc = it.score !== undefined ? it.score : it['得分'];
-    a = a == null ? '' : String(a).trim(); if (a === '?') a = '';
-    r.a[i] = a;
-    var auto = isObj(q) && q.type !== 'blank' ? autoScore(q, a) : null, v = parseFloat(sc);
+  var r = { a: [], g: [], src: 'ai', at: Date.now() }, old = m.rows[s.id], got = 0;
+  if (old) { r.a = old.a.slice(); r.g = old.g.slice(); if (old.rv) r.rv = old.rv; }
+  res.items.forEach(function (it) {
+    var i = it.n - 1, q = p.items[i]; if (!q) return;
+    var a = qmStr(it.ans), v = parseFloat(it.score), none = /^[-—–－\/]$|^(无此题|不在本页|本页没有|没有这题|不在这张)$/.test(a) || (a === '' && it.score === null);
+    if (a === '?' || a === '？') a = '';
+    if (none) return;   // 这张照片上没有这道题
+    var had = old && (old.a[i] || typeof old.g[i] === 'number' && old.g[i] > 0);
+    if (had && a === '' && !(v > 0)) return;
+    r.a[i] = a; got++;
+    var auto = isObj(q) && q.type !== 'blank' ? autoScore(q, a) : null;
     r.g[i] = auto !== null ? auto : !isNaN(v) ? clamp(round1(v), 0, q.score) : (isObj(q) ? autoScore(q, a) : null);
   });
-  if (res.comment || res['点评']) r.note = String(res.comment || res['点评']).slice(0, 120);
+  if (!got && !old) return null;
+  if (res.comment) r.note = (old && old.note && old.note !== res.comment && old.at > Date.now() - 600000 ? old.note + '；' : '') + res.comment.slice(0, 120);
+  else if (old && old.note) r.note = old.note;
   m.rows[s.id] = r; m.ut = Date.now();
   return s;
 }
+/* 没认出是谁的答卷，猜一个：照片上没写名字的，多半是上一张那位同学的第 2 页；
+   写了但对不上的，按学号顺序猜是上一位后面还没批的同学 */
+function qmGuess(c, u) {
+  var k = u.imgs && u.imgs.length ? QM.imgs.indexOf(u.imgs[0]) : -1, stu = studentsOf(c.id), m = markOf(QM.pid, c.id), prev = null;
+  for (var i = k - 1; i >= 0; i--) { var x = QM.imgs[i]; if (x.st === 'ok' && x.sid) { prev = stuById(x.sid); break; } if (x.st === 'unk' && x.guess) { prev = stuById(x.guess); break; } }
+  var r = u.res || {};
+  if (prev && !r.no && !r.name) return { s: prev, why: '照片上没写姓名，可能是上一张（' + prev.name + '）的后一页' };
+  var start = prev ? stu.indexOf(stu.filter(function (s) { return s.id === prev.id; })[0]) + 1 : 0;
+  for (var j = Math.max(0, start); j < stu.length; j++) if (!(m && m.rows[stu[j].id]) && !QM.unk.some(function (v) { return v !== u && v.pick === stu[j].id; })) return { s: stu[j], why: prev ? '按顺序排在 ' + prev.name + ' 后面' : '按学号顺序' };
+  return null;
+}
 function qmUnkHTML(c) {
-  return '<div class="panel qm-unk"><div class="panel-title" style="margin-bottom:8px">' + QM.unk.length + ' 份没认出是谁 <span class="muted" style="font-weight:400;font-size:12.5px">看一下照片，选上是哪位同学</span></div>' + QM.unk.map(function (u, k) {
-    var r = u.res || {}, sc = (r.items || []).reduce(function (a, it) { var v = parseFloat(it && it.score); return a + (isNaN(v) ? 0 : v); }, 0);
-    return '<div class="qm-unk-it">' + (u.imgs || []).map(function (im) { return '<img src="' + im.url + '" data-act="qm-unk-view" data-k="' + k + '">'; }).join('') + '<span>AI 认到：学号「' + esc(r.no || '') + '」姓名「' + esc(r.name || '') + '」，约 ' + fmtNum(sc) + ' 分</span><span class="grow"></span><select class="sel" style="height:32px;max-width:200px" id="qmUnk' + k + '"><option value="">选择学生</option>' + studentsOf(c.id).map(function (s) { return '<option value="' + s.id + '">' + esc((s.no ? s.no + ' ' : '') + s.name) + '</option>'; }).join('') + '</select><button class="btn btn-sm btn-dark" data-act="qm-unk-ok" data-k="' + k + '">确定</button><button class="btn btn-sm btn-ghost" data-act="qm-unk-skip" data-k="' + k + '">不要了</button></div>';
+  QM.unk.forEach(function (u) { u.pick = ''; });
+  var gs = QM.unk.map(function (u) { var g = qmGuess(c, u); u.pick = g ? g.s.id : ''; if (u.imgs && u.imgs[0]) u.imgs[0].guess = u.pick; return g; });
+  return '<div class="panel qm-unk"><div style="display:flex;align-items:center;gap:10px;margin-bottom:8px"><div class="panel-title">' + QM.unk.length + ' 份没认出是谁 <span class="muted" style="font-weight:400;font-size:12.5px">看一下照片，选上是哪位同学</span></div><span class="grow"></span>' + (gs.some(Boolean) ? '<button class="btn btn-sm btn-light" data-act="qm-unk-all">' + ICON.check + '都按建议对应</button>' : '') + '</div>' + QM.unk.map(function (u, k) {
+    var r = u.res || {}, sc = (r.items || []).reduce(function (a, it) { var v = parseFloat(it && it.score); return a + (isNaN(v) ? 0 : v); }, 0), g = gs[k];
+    return '<div class="qm-unk-it">' + (u.imgs || []).map(function (im) { return '<img src="' + im.url + '" data-act="qm-unk-view" data-k="' + k + '">'; }).join('') + '<span>AI 认到：' + (r.no || r.name ? '学号「' + esc(r.no || '') + '」姓名「' + esc(r.name || '') + '」' : '没写学号和姓名') + '，约 ' + fmtNum(sc) + ' 分' + (g ? '<br><small class="muted">' + esc(g.why) + '</small>' : '') + '</span><span class="grow"></span><select class="sel" style="height:32px;max-width:200px" id="qmUnk' + k + '"><option value="">选择学生</option>' + studentsOf(c.id).map(function (s) { return '<option value="' + s.id + '"' + (g && g.s.id === s.id ? ' selected' : '') + '>' + esc((s.no ? s.no + ' ' : '') + s.name) + '</option>'; }).join('') + '</select><button class="btn btn-sm btn-dark" data-act="qm-unk-ok" data-k="' + k + '">确定</button><button class="btn btn-sm btn-ghost" data-act="qm-unk-skip" data-k="' + k + '">不要了</button></div>';
   }).join('') + '</div>';
 }
 UI.act['qm-unk-view'] = function (el) { var u = QM.unk[+el.getAttribute('data-k')]; UI.modal({ title: '这份答卷', wide: true, body: (u.imgs || []).map(function (im) { return '<img src="' + im.url + '" style="width:100%;border-radius:10px;margin-bottom:8px">'; }).join(''), foot: false }); };
 UI.act['qm-unk-ok'] = function (el) {
   var k = +el.getAttribute('data-k'), sid = $('#qmUnk' + k).value; if (!sid) { UI.toast('先选是哪位同学'); return; }
   var p = paperById(QM.pid), m = ensureMark(p.id, QM.cid), u = QM.unk[k];
-  qmApply(p, m, u.res, sid); (u.imgs || []).forEach(function (im) { im.st = 'ok'; im.sid = sid; });
+  qmApply(p, m, u.res, sid); (u.imgs || []).forEach(function (im) { im.st = 'ok'; im.sid = sid; im.msg = stuById(sid).name; });
   QM.unk.splice(k, 1); save(); renderQmMain(); qmRefreshList();
+};
+UI.act['qm-unk-all'] = function () {
+  var p = paperById(QM.pid), m = ensureMark(p.id, QM.cid), n = 0;
+  QM.unk.forEach(function (u, k) { var sel = $('#qmUnk' + k), sid = sel ? sel.value : u.pick; if (!sid) return; qmApply(p, m, u.res, sid); (u.imgs || []).forEach(function (im) { im.st = 'ok'; im.sid = sid; im.msg = stuById(sid).name; }); u.done = 1; n++; });
+  QM.unk = QM.unk.filter(function (u) { return !u.done; }); save(); renderQmMain(); qmRefreshList();
+  UI.toast('对应好 ' + n + ' 份' + (QM.unk.length ? '，还有 ' + QM.unk.length + ' 份要手动选' : ''));
 };
 UI.act['qm-unk-skip'] = function (el) { QM.unk.splice(+el.getAttribute('data-k'), 1); renderQmMain(); };
 
-/* ---------- AI 批改：一次批一位同学（他的几张照片一起发），两份同时进行 ---------- */
+/* ---------- AI 批改：一次批一位同学（他的几张照片一起发）----------
+   出错自动重试（限流、网络抖动、回复格式不对、被截断）；免费额度、本地模型一次只批一份，其他两份同时批 */
+function qmConc() { var a = S.settings.ai, b = String(a.base || ''); return a.provider === 'glm' || a.provider === 'ollama' || a.provider === 'custom' || /bigmodel|localhost|127\.0\.0\.1/.test(b) ? 1 : 2; }
 UI.act['qm-go'] = function () {
+  if (!needAI('拍照 / 扫描批改', true, function () { renderQmMain(); })) return;
+  if (!AIC.ready()) return;
+  if (QM.reading) { UI.toast('照片还在读取，稍等一下'); return; }
   var p = paperById(QM.pid), c = clsById(QM.cid); if (!p || !c) return;
   var groups = []; for (var k = 0; k < QM.imgs.length; k += QM.per) groups.push(QM.imgs.slice(k, k + QM.per));
   groups = groups.filter(function (g) { return g.some(function (x) { return x.st !== 'ok'; }); });
   if (!groups.length) return;
   var run = QM.run = { stop: false, ctrls: [], msg: '', done: 0, total: groups.length, ok: 0, bad: 0 }, m = ensureMark(p.id, c.id), text = qmPromptText(p, false), qi = 0;
   QM.unk = QM.unk.filter(function (u) { return !u.imgs || !u.imgs.length; });
+  groups.forEach(function (g) { g.forEach(function (x) { x.st = 'wait'; x.msg = ''; x.guess = ''; }); });
+  function check(txt) { var r = qmRes(parseAIJSON(txt)); return r.length && r[0].items.length ? r : null; }
+  /* 一位同学几张答卷：先一起发；模型一次只收一张图的（返回 400），改成一张一张批，再合成一份 */
+  function ask1(urls, no, sig) {
+    return AIC.ask({
+      messages: AIC.visionMsgs(text, urls), signal: sig, max: 8000, model: AIC.vmodel(), temp: 0.1, think: false, tries: 3, check: check,
+      onRetry: function (n, e) { if (run.stop) return; run.msg = '第 ' + no + ' 份' + (e && e.status === 429 ? '被限流了' : '没批好') + '，自动重试（' + n + '）…'; qmRefreshPhoto(); }
+    }).then(function (o) { return o.val[0]; });
+  }
+  function byPage(g, no, sig) {
+    var out = [];
+    return g.reduce(function (pr, x) { return pr.then(function () { return ask1([x.url], no, sig).then(function (r) { out.push(r); }); }); }, Promise.resolve()).then(function () { return qmMergeRes(out); });
+  }
+  function grade(g, no, sig) {
+    if (g.length > 1 && run.single) return byPage(g, no, sig);
+    return ask1(g.map(function (x) { return x.url; }), no, sig).catch(function (e) {
+      if (g.length > 1 && e && e.status === 400 && !run.stop) { run.single = true; return byPage(g, no, sig); }
+      throw e;
+    });
+  }
   function next() {
     if (run.stop) return Promise.resolve();
     var g = groups[qi++]; if (!g) return Promise.resolve();
-    g.forEach(function (x) { x.st = 'run'; x.msg = ''; }); run.msg = '正在批第 ' + Math.min(qi, run.total) + ' / ' + run.total + ' 份'; qmRefreshPhoto();
+    var no = qi;
+    g.forEach(function (x) { x.st = 'run'; x.msg = ''; }); run.msg = '正在批第 ' + Math.min(no, run.total) + ' / ' + run.total + ' 份'; qmRefreshPhoto();
     var ctrl = window.AbortController ? new AbortController() : null; if (ctrl) run.ctrls.push(ctrl);
-    return AIC.stream(AIC.visionMsgs(text, g.map(function (x) { return x.url; })), function () { }, ctrl ? ctrl.signal : null, 3000, AIC.vmodel()).then(function (txt) {
+    return grade(g, no, ctrl ? ctrl.signal : null).then(function (j) {
       if (run.stop) return;
-      var j = parseAIJSON(txt); if (Array.isArray(j)) j = j[0];
-      if (!j || !(j.items || j.answers)) { g.forEach(function (x) { x.st = 'err'; x.msg = 'AI 的回复没法识别：' + String(txt || '').slice(0, 80); }); run.bad++; return; }
       var s = qmApply(p, m, j);
       if (s) { g.forEach(function (x) { x.st = 'ok'; x.sid = s.id; x.msg = s.name + ' · ' + fmtNum(rowTotal(p, m.rows[s.id])) + ' 分'; }); run.ok++; }
       else { g.forEach(function (x) { x.st = 'unk'; x.msg = '没认出是谁'; }); QM.unk.push({ res: j, imgs: g }); }
       save();
     }, function (e) {
       if (run.stop) return;
-      g.forEach(function (x) { x.st = 'err'; x.msg = e && e.message || '出错了'; }); run.bad++;
-      if (e && (e.status === 401 || e.status === 403 || e.status === 404 || e.status === 402)) { run.stop = true; run.fatal = e.message; }
-    }).then(function () { run.done++; if (!run.stop) { var w = $('.qm-wrap'), sl = w ? w.scrollLeft : 0, st = $('.page') ? $('.page').scrollTop : 0; qmRefreshPhoto(); } return next(); });
+      g.forEach(function (x) { x.st = 'err'; x.msg = e && e.message || '出错了'; }); run.bad++; run.lastErr = e && e.message;
+      if (e && (e.status === 401 || e.status === 403 || e.status === 404 || e.status === 402 || e.status === 400 && /image|图片|图像|vision|视觉|multimodal|多模态|content type|image_url/i.test(e.message || ''))) { run.stop = true; run.fatal = e.message; (run.ctrls || []).forEach(function (cc) { try { cc.abort(); } catch (x) { } }); }
+    }).then(function () { run.done++; if (!run.stop) qmRefreshPhoto(); return next(); });
   }
-  Promise.all([next(), next()]).then(function () {
+  var ws = []; for (var w = 0; w < Math.min(qmConc(), groups.length); w++) ws.push(next());
+  Promise.all(ws).then(function () {
     if (QM.run !== run) return;
     QM.run = null; QM.imgs.forEach(function (x) { if (x.st === 'run') x.st = 'wait'; });
     var sc = $('.page') ? $('.page').scrollTop : 0; renderQmMain(); qmRefreshList(); if ($('.page')) $('.page').scrollTop = sc;
-    if (run.fatal) UI.modal({ title: 'AI 批改没法继续', body: '<p style="white-space:pre-line;line-height:1.7;color:var(--ink2)">' + esc(run.fatal) + '</p><p class="muted" style="font-size:12.5px;line-height:1.7">批改要用能看图的模型。到「设置 → AI 接口」检查「识图模型」，或者先用「复制提示词」在 AI 网页版里批。</p>', foot: '<button class="btn btn-light" data-act="modal-close">知道了</button><button class="btn btn-dark" data-act="go" data-page="settings" data-sec="ai">去设置</button>' });
-    else UI.toast('批完 ' + run.ok + ' 份' + (QM.unk.length ? '，' + QM.unk.length + ' 份没认出是谁' : '') + (run.bad ? '，' + run.bad + ' 份出错（可以再点一次重试）' : '') + '。主观题的分数请过目一下', 4200);
+    if (run.fatal) UI.modal({ title: 'AI 批改没法继续', body: '<p style="white-space:pre-line;line-height:1.7;color:var(--ink2)">' + esc(run.fatal) + '</p><p class="muted" style="font-size:12.5px;line-height:1.7">批改要用能看图的模型。到「设置 → AI 接口」检查「识图模型」，点「测试识图」看看能不能用。</p>', foot: '<button class="btn btn-light" data-act="modal-close">知道了</button><button class="btn btn-dark" data-act="go" data-page="settings" data-sec="ai">去设置</button>' });
+    else if (run.bad && !run.ok && !QM.unk.length) UI.modal({ title: '这几份没批成', body: '<p style="white-space:pre-line;line-height:1.7;color:var(--ink2)">已经自动重试过了，还是不行：<br>' + esc(run.lastErr || '') + '</p><p class="muted" style="font-size:12.5px;line-height:1.7">照片太糊、反光或者拍歪了，AI 会认不出；重新拍清楚一点再试。连续出错的话，到「设置 → AI 接口」点「测试识图」检查一下。</p>', foot: '<button class="btn btn-light" data-act="modal-close">知道了</button>' });
+    else UI.toast('批完 ' + run.ok + ' 份' + (QM.unk.length ? '，' + QM.unk.length + ' 份没认出是谁（下面可以一键对应）' : '') + (run.bad ? '，' + run.bad + ' 份没批成（点照片看原因，再点一次「开始 AI 批改」只批这几份）' : '') + '。主观题的分数请过目一下', 5200);
   });
   qmRefreshPhoto();
 };
@@ -11696,35 +12068,38 @@ function qkFilesDone(texts, msgs, direct) {
 function qkVisPrompt() {
   return '图片是一份' + qLevel() + ownName() + '考试的「参考答案及评分标准」（也可能是带答案的试卷，或者学生用的答题卡样张）。请整理出每道题的标准答案：\n' +
     '1. 按题号从小到大，一题一个对象：{"n": 题号, "type": "选择题/多选题/判断题/填空题/计算题/解答题/作文……", "score": 这题的满分（数字，看大题标题里的「每小题 x 分」或者题号后面的「（x 分）」）, "answer": "标准答案：选择题给字母，判断题给对或错，填空题几个空用；隔开，主观题写最终结果", "points": "主观题的解答过程和评分要点，按步骤写清每步几分"}\n' +
-    '2. 大题里的小问合在一道题里，分值加起来。\n3. 照图片原文抄，不要自己解题；图片上没有的题不要编。\n只输出一个 JSON 数组，不要任何解释。';
+    '2. 大题里的小问合在一道题里，分值加起来。\n3. 照图片原文抄，不要自己解题；图片上没有的题不要编。\n4. 答案和分值分开写：answer 里只写答案，不要带「（3 分）」这样的分值。数学式用普通文字和符号（x²、√2、3/4），不要用 LaTeX。\n只输出一个 JSON 数组，不要任何解释。';
 }
 function qkVisHTML() {
   var run = QK.run && !QK.run.stop, ready = AIC.ready(), h = '<div class="qi-vis"><div class="qi-vis-h">' + ICON.img + '<b>' + QK.vis.length + ' 张图片 / 扫描页</b><span class="muted">要用能看图的 AI 认出答案</span></div><div class="qm-thumbs">' + QK.vis.map(function (x, k) {
     return '<div class="qm-th st-' + x.st + '" title="' + esc(x.msg || x.name) + '"><img src="' + x.url + '" alt="" data-act="qk-vis-view" data-k="' + k + '"><span class="qm-st">' + { wait: '待识别', run: '<span class="spin"></span>识别中', ok: '认出 ' + (x.n || 0) + ' 题', err: '出错' }[x.st] + '</span>' + (run ? '' : '<button class="qm-x" data-act="qk-vis-rm" data-k="' + k + '" aria-label="去掉">' + ICON.x + '</button>') + '</div>';
   }).join('') + '</div>';
   if (run) h += '<div class="qg-run" style="margin-top:10px"><span class="spin"></span>' + esc(QK.run.msg || '') + '</div>';
+  else if (!ready && !QAI.prompt) h += '<div style="margin-top:12px">' + aiGateHTML('识别图片里的答案', true, 'qk') + '</div>';
   else if (!ready) h += '<div class="qg-steps" style="margin-top:12px"><div><b>1</b>复制提示词，打开豆包、通义、Kimi 等能看图的 AI</div><div><b>2</b>把这几张图片（或者扫描版 PDF）和提示词一起发过去</div><div><b>3</b>把回复粘贴到下面，点「识别答案」</div></div><div class="prompt-box" style="max-height:110px">' + esc(qkVisPrompt()) + '</div><textarea class="ta" id="qkVisPaste" style="min-height:80px;margin-top:8px" placeholder="把 AI 回复的内容（以 [ 开头的那一段）粘贴到这里"></textarea>';
   return h + '</div>';
 }
 function qkVisFoot() {
   var run = QK.run && !QK.run.stop, f = '<button class="btn btn-ghost" data-act="qk-vis-clear" style="margin-right:auto"' + (run ? ' disabled' : '') + '>不用这些图片</button>';
   if (run) return f + '<button class="btn btn-light" data-act="qk-vis-stop">停止</button>';
-  if (AIC.ready()) return f + '<button class="btn btn-light" data-act="qk-vis-copy">' + ICON.copy + '复制提示词</button><button class="btn btn-dark" data-act="qk-vis-go">' + ICON.spark + '让 AI 识别答案（' + QK.vis.length + ' 张）</button>';
-  return f + '<button class="btn btn-light" data-act="qk-vis-copy">' + ICON.copy + '复制提示词</button><button class="btn btn-dark" data-act="qk-vis-parse">识别答案</button>';
+  if (AIC.ready()) return f + '<button class="btn btn-dark" data-act="qk-vis-go">' + ICON.spark + '让 AI 识别答案（' + QK.vis.length + ' 张）</button>';
+  if (QAI.prompt) return f + '<button class="btn btn-light" data-act="qk-vis-copy">' + ICON.copy + '复制提示词</button><button class="btn btn-dark" data-act="qk-vis-parse">识别答案</button>';
+  return f + '<button class="btn btn-light" data-act="modal-close">取消</button>';
 }
 UI.act['qk-vis-view'] = function (el) { var x = QK.vis[+el.getAttribute('data-k')]; UI.lightbox(x.url, x.name); };
 UI.act['qk-vis-rm'] = function (el) { qkKeep(); QK.vis.splice(+el.getAttribute('data-k'), 1); renderQK(); };
 UI.act['qk-vis-clear'] = function () { qkKeep(); QK.vis = []; renderQK(); };
-UI.act['qk-vis-copy'] = function () { copyText(qkVisPrompt()); };
 UI.act['qk-vis-stop'] = function () { if (QK.run) { QK.run.stop = true; (QK.run.ctrls || []).forEach(function (c) { try { c.abort(); } catch (e) { } }); } QK.vis.forEach(function (x) { if (x.st === 'run') x.st = 'wait'; }); QK.run = null; renderQK(); };
 function qkTakeJSON(txt) {
-  var j = parseAIJSON(txt), arr = Array.isArray(j) ? j : j && Array.isArray(j.items) ? j.items : j ? [j] : [];
+  var arr = aiList(parseAIJSON(txt), ['answers', 'keys', '答案']);
   return arr.map(function (x, k) {
     if (!x || typeof x !== 'object') return null;
     var g = function () { for (var i = 0; i < arguments.length; i++) { var v = x[arguments[i]]; if (v !== undefined && v !== null && v !== '') return v; } return ''; };
     var tp = qtByName(g('type', '题型')) || 'answer', ans = g('answer', '答案', 'ans'), pts = g('points', '评分要点', 'analysis', '解析');
     if (Array.isArray(ans)) ans = ans.join('；'); if (Array.isArray(pts)) pts = pts.join('\n');
-    return { n: +g('n', '题号', 'no') || k + 1, type: tp, score: +g('score', '分值', '满分') || qtOf(tp).def, ans: String(ans).trim(), ana: String(pts).trim() };
+    ans = String(ans).trim(); var sc = +g('score', '分值', '满分'), tm = ans.match(/\s*[（(]\s*(\d+(?:\.\d+)?)\s*分\s*[)）]\s*$/);   // 答案里混进了分值「B（3分）」
+    if (tm) { ans = ans.slice(0, tm.index).trim(); if (!sc) sc = +tm[1]; }
+    return { n: qmNum(g('n', '题号', 'no')) || k + 1, type: tp, score: sc || qtOf(tp).def, ans: ans, ana: String(pts).trim() };
   }).filter(Boolean);
 }
 function qkVisApply(keys) {
@@ -11733,8 +12108,11 @@ function qkVisApply(keys) {
   QK.items = items; QK.view = 'tbl';
   QK.notes = ['认出 ' + items.length + ' 道题，满分 ' + fmtNum(round1(sum(items.map(function (q) { return q.score; })))) + ' 分。AI 认的答案请逐题对一下，特别是主观题的分值。'];
 }
+UI.act['qk-vis-copy'] = function () { copyText(qkVisPrompt()); };
 UI.act['qk-vis-parse'] = function () { var t = ($('#qkVisPaste') || {}).value || ''; if (!t.trim()) { UI.toast('先把 AI 的回复粘贴进来'); return; } var keys = qkTakeJSON(t); if (!keys.length) { QK.err = '没认出结果，请把 AI 回复的 JSON 整段粘贴进来。'; renderQK(); return; } qkKeep(); QK.err = ''; QK.vis = []; qkVisApply(keys); renderQK(); };
+QAI.cont.qk = function () { qkKeep(); renderQK(); };
 UI.act['qk-vis-go'] = function () {
+  if (!AIC.ready()) return;
   qkKeep();
   var run = QK.run = { stop: false, ctrls: [], msg: '' }, qi = 0, keys = [], todo = QK.vis.slice(), text = qkVisPrompt();
   QK.err = '';
@@ -11743,11 +12121,14 @@ UI.act['qk-vis-go'] = function () {
     var x = todo[qi++]; if (!x) return Promise.resolve();
     x.st = 'run'; run.msg = '正在识别第 ' + Math.min(qi, todo.length) + ' / ' + todo.length + ' 张…'; renderQK();
     var ctrl = window.AbortController ? new AbortController() : null; if (ctrl) run.ctrls.push(ctrl);
-    return AIC.stream(AIC.visionMsgs(text, [x.url]), function () { }, ctrl ? ctrl.signal : null, 5000, AIC.vmodel()).then(function (txt) {
-      if (run.stop) return; var l = qkTakeJSON(txt); x.n = l.length; x.st = l.length ? 'ok' : 'err'; if (!l.length) x.msg = 'AI 的回复里没认出答案'; keys = keys.concat(l);
+    return AIC.ask({ messages: AIC.visionMsgs(text, [x.url]), signal: ctrl ? ctrl.signal : null, max: 8000, model: AIC.vmodel(), temp: 0.1, think: false, tries: 3,
+      check: function (txt) { var l = qkTakeJSON(txt); return l.length ? l : null; },
+      onRetry: function (n) { if (!run.stop) { run.msg = '第 ' + qi + ' 张没认好，自动重试（' + n + '）…'; renderQK(); } } }).then(function (o) {
+      if (run.stop) return; var l = o.val; x.n = l.length; x.st = 'ok'; keys = keys.concat(l);
     }, function (e) { if (run.stop) return; x.st = 'err'; x.msg = e && e.message || '出错了'; if (e && (e.status === 401 || e.status === 403 || e.status === 404 || e.status === 402)) { run.stop = true; QK.err = esc(e.message) + '<br>识别图片要用能看图的模型，到「设置 → AI 接口」检查「识图模型」。'; } }).then(next);
   }
-  Promise.all([next(), next()]).then(function () {
+  var ws = []; for (var w = 0; w < Math.min(qmConc(), todo.length); w++) ws.push(next());
+  Promise.all(ws).then(function () {
     if (QK.run !== run) return; QK.run = null;
     if (keys.length) { keys.sort(function (a, b) { return a.n - b.n; }); QK.vis = QK.vis.filter(function (x) { return x.st !== 'ok'; }); qkVisApply(keys); }
     renderQK();
@@ -11973,11 +12354,12 @@ function renderQwPr(kps) {
     '<div class="field"><label>针对哪些薄弱知识点</label>' + (kps.length ? '<div class="chips">' + kps.map(function (k) { return '<button type="button" class="' + (o.kps[k.k] ? 'on' : '') + '" data-act="qwp-kp" data-v="' + esc(k.k) + '">' + esc(k.k) + ' <span class="num">' + pct(k.rate) + '</span></button>'; }).join('') + '</div>' : '<div class="muted" style="font-size:12.5px">没有得分率低于 85% 的知识点（或者题目还没标知识点）</div>') + '</div>' +
     '<label class="qm-opt"><input type="checkbox" data-chg="qwp" data-k="redo"' + (o.redo ? ' checked' : '') + '><div><b>错得最多的原题重做</b><small>错误率最高的 <span class="stepper sm"><button type="button" data-act="qwp-n" data-k="nRedo" data-d="-1">−</button><b class="num">' + o.nRedo + '</b><button type="button" data-act="qwp-n" data-k="nRedo" data-d="1">+</button></span> 道（有题干的题）</small></div></label>' +
     '<label class="qm-opt"><input type="checkbox" data-chg="qwp" data-k="same"' + (o.same ? ' checked' : '') + '><div><b>从题库挑同类新题</b><small>上面每个知识点挑 <span class="stepper sm"><button type="button" data-act="qwp-n" data-k="nSame" data-d="-1">−</button><b class="num">' + o.nSame + '</b><button type="button" data-act="qwp-n" data-k="nSame" data-d="1">+</button></span> 道没在这些卷子里出过的题</small></div></label>' +
-    '<label class="qm-opt"><input type="checkbox" data-chg="qwp" data-k="ai"' + (o.ai ? ' checked' : '') + (top.length ? '' : ' disabled') + '><div><b>再让 AI 出变式题</b><small>' + (top.length ? '针对错得最多的 ' + top.length + ' 道题，每道换数据出 2 道' + (AIC.ready() ? '' : '（没配置 API 时会给你提示词）') : '错题都没有题干，出不了变式') + '</small></div></label>' +
+    '<label class="qm-opt' + (aiOK() ? '' : ' off') + '"><input type="checkbox" data-chg="qwp" data-k="ai"' + (o.ai && aiOK() ? ' checked' : '') + (top.length && aiOK() ? '' : ' disabled') + '><div><b>再让 AI 出变式题</b><small>' + (!aiOK() ? '要先在「设置 → AI 接口」配置好 API' : top.length ? '针对错得最多的 ' + top.length + ' 道题，每道换数据出 2 道' + (AIC.ready() ? '' : '（没配置 API，会给你提示词）') : '错题都没有题干，出不了变式') + '</small></div></label>' + (aiOK() || !top.length ? '' : '<div style="margin:-2px 0 10px">' + aiGateHTML('让 AI 出变式题', false, 'qwp') + '</div>') +
     '<div class="field" style="margin-top:12px"><label>出成</label><div class="seg light">' + PAPER_KINDS.map(function (k) { return '<button type="button" class="' + (o.kind === k[0] ? 'on' : '') + '" data-act="qwp-kind" data-v="' + k[0] + '">' + k[1] + '</button>'; }).join('') + '</div></div>';
   UI.modal({ title: '一键出巩固练习', wide: true, body: body, foot: '<button class="btn btn-light" data-act="modal-close">取消</button><button class="btn btn-dark" data-act="qwp-go">' + ICON.shuffle + '出练习</button>', noFocus: true });
   QW.prKps = kps;
 }
+QAI.cont.qwp = function () { renderQwPr(QW.prKps); };
 UI.act['qwp-kp'] = function (el) { var k = el.getAttribute('data-v'); QW.pr.kps[k] = !QW.pr.kps[k]; renderQwPr(QW.prKps); };
 UI.chg['qwp'] = function (el) { QW.pr[el.getAttribute('data-k')] = el.checked; };
 UI.act['qwp-n'] = function (el) { var k = el.getAttribute('data-k'); QW.pr[k] = clamp(QW.pr[k] + (+el.getAttribute('data-d')), 1, 10); renderQwPr(QW.prKps); };
@@ -11993,7 +12375,8 @@ UI.act['qwp-go'] = function () {
     c.slice(0, o.nSame).forEach(function (q) { used[q.id] = 1; items.push(q); });
     if (c.length < o.nSame) short.push(k);
   });
-  if (!items.length && !o.ai) { UI.toast('没挑到题：题库里没有这些知识点的其他题，可以勾上「让 AI 出变式题」'); return; }
+  if (!aiOK()) o.ai = false;
+  if (!items.length && !o.ai) { UI.toast(aiOK() ? '没挑到题：题库里没有这些知识点的其他题，可以勾上「让 AI 出变式题」' : '没挑到题：题库里没有这些知识点的其他题。配置好 AI 接口后可以让 AI 出变式题', 3600); return; }
   var p = newPaper(o.kind, '巩固练习' + (kps.length ? ' · ' + kps.slice(0, 2).join('、') : '') + ' ' + fmtMD(todayStr())); p.kind = o.kind;
   if (QW.cid) p.cids = [QW.cid]; else { var cs = {}; S.marks.forEach(function (m) { if (!QW.pid || m.pid === QW.pid) cs[m.cid] = 1; }); p.cids = S.classes.filter(function (c) { return cs[c.id]; }).map(function (c) { return c.id; }); }
   addToPaper(p, items); QP.pid = p.id; UI.closeModal(); UI.go('qpaper');
@@ -12002,11 +12385,12 @@ UI.act['qwp-go'] = function () {
     qGenModal({ title: 'AI 出变式题', base: top[0].q,
       prompt: '下面是学生错得最多的 ' + top.length + ' 道' + ownName() + '题（附错误率和常见错误答案）。请针对每道题出 2 道「换数据」的变式题，考同样的知识和方法，帮学生针对性巩固，一共 ' + top.length * 2 + ' 道。\n\n' + top.map(function (it, k) { var wa = Object.keys(it.ans).sort(function (a, b) { return it.ans[b] - it.ans[a]; }).slice(0, 2); return '【第' + (k + 1) + '题】错误率 ' + pct(it.err) + (wa.length ? '，常见错误答案：' + wa.join('；') : '') + '\n' + qText(it.q); }).join('\n\n'),
       actions: [['paper', '存入题库并加入练习']], onDone: function (list) { qvDone(list, 'paper', { paper: p.id, after: function () { UI.go('qpaper'); } }); } });
-  } else UI.toast('出好了 ' + items.length + ' 道' + (short.length ? '；' + short.join('、') + '在题库里的题不够，可以在「组题」里点题目旁边的变式按钮让 AI 补' : ''), 3600);
+  } else UI.toast('出好了 ' + items.length + ' 道' + (short.length ? '；' + short.join('、') + '在题库里的题不够，' + (aiOK() ? '可以在「组题」里点题目旁边的变式按钮让 AI 补' : '配置好 AI 接口后可以让 AI 补题') : ''), 3600);
 };
 
 /* ---------- AI 讲评提纲 ---------- */
 UI.act['qw-ai'] = function () {
+  if (!needAI('AI 写讲评提纲', false, function () { UI.act['qw-ai'](); })) return;
   var st = qwStats(), cls = QW.cid ? clsById(QW.cid).name : S.classes.filter(function (c) { return S.marks.some(function (m) { return m.cid === c.id; }); }).map(function (c) { return c.name; }).join('、');
   var items = st.items.filter(function (it) { return it.wrong; }).slice(0, 8);
   var ctx = '【错题统计】' + cls + (QW.pid ? '，' + paperById(QW.pid).title : '，' + st.papers.length + ' 份作业 / 试卷') + '；批改 ' + st.nRows + ' 人次，平均得分率 ' + pct(st.rate) + '\n' +
@@ -12109,7 +12493,7 @@ function renderSetBody() {
       (pr.site ? '<div class="hint">到 ' + esc(pr.site) + ' 注册并创建 API Key' + (pr.hint ? '；' + esc(pr.hint) : '') + '</div>' : (pr.hint ? '<div class="hint">' + esc(pr.hint) + '</div>' : '')) + '</div>' +
       '<div class="field"><label>API Key</label><div style="display:flex;gap:6px"><input class="inp num" type="password" id="aiKey" value="' + esc(a.key) + '" placeholder="sk-..." data-inp="set" data-path="ai.key" autocomplete="off"><button class="btn btn-light btn-icon" data-act="ai-key-eye" title="显示/隐藏" aria-label="显示或隐藏 Key">' + ICON.eye + '</button></div></div>' +
       '<div class="row2"><div class="field"><label>接口地址（Base URL）</label>' + sInp('ai.base', a.base, 'https://.../v1') + '</div><div class="field"><label>模型名称</label>' + sInp('ai.model', a.model, '如：deepseek-flash') + '</div></div>' +
-      '<div class="row2"><div class="field"><label>识图模型（要能看图）</label>' + sInp('ai.vmodel', a.vmodel, '不填就用上面的模型' + (pr.vmodel ? '，建议 ' + pr.vmodel : '')) + '<div class="hint">拍照批改、识别扫描的题目和参考答案，要用能看图的模型' + (pr.vmodel ? '，这家可以用 ' + esc(pr.vmodel) : pr.id === 'deepseek' || pr.id === 'kimi' || pr.id === 'openai' || pr.id === 'claude' ? '，这家的默认模型就能看图，可以不填' : '，填控制台里带视觉能力的模型') + '</div></div><div class="field"><label>&nbsp;</label><div style="display:flex;gap:10px;align-items:center;height:38px"><button class="btn btn-light" data-act="ai-test-vision">测试识图</button><span id="aiVisRes" class="muted" style="font-size:12.5px"></span></div></div></div>' +
+      '<div class="row2"><div class="field"><label>识图模型（要能看图）</label>' + sInp('ai.vmodel', a.vmodel, pr.vmodel ? '不填就用 ' + pr.vmodel : '不填就用上面的模型') + '<div class="hint">拍照批改、识别扫描的题目和参考答案，要用能看图的模型' + (pr.vmodel ? '，这家可以用 ' + esc(pr.vmodel) : pr.id === 'deepseek' || pr.id === 'kimi' || pr.id === 'openai' || pr.id === 'claude' ? '，这家的默认模型就能看图，可以不填' : '，填控制台里带视觉能力的模型') + '</div></div><div class="field"><label>&nbsp;</label><div style="display:flex;gap:10px;align-items:center;height:38px"><button class="btn btn-light" data-act="ai-test-vision">测试识图</button><span id="aiVisRes" class="muted" style="font-size:12.5px"></span></div></div></div>' +
       '<div class="row2"><div class="field"><label>创造性（temperature）</label>' + sInp('ai.temp', a.temp, '0.7', 'number', ' step="0.1" min="0" max="1.5"') + '<div class="hint">写材料建议 0.6–0.8；出题、分析可以调低到 0.3–0.5</div></div>' +
       '<div class="field"><label>隐私</label><label class="chk" style="height:38px"><input type="checkbox" data-chg="ai-mask"' + (a.mask ? ' checked' : '') + '>发送前隐去学生姓名</label><div class="hint">姓名替换成【学生07】这样的编号，结果回来后自动换回</div></div></div>' +
       '<div style="display:flex;gap:10px;align-items:center"><button class="btn btn-dark" data-act="ai-test">测试连接</button><span id="aiTestRes" class="muted" style="font-size:13px"></span></div></div>' +
